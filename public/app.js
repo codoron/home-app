@@ -34,6 +34,7 @@ const P = {
   star: 'M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z',
   up: 'M12 7l7 8H5z', down: 'M12 17 5 9h14z', stop: 'M7 7h10v10H7z',
   minus: 'M5 11h14v2H5z', plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z',
+  back: 'M10 6l-6 6 6 6 1.4-1.4L7.8 13H20v-2H7.8l3.6-3.6z',
   moon: 'M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z',
 };
 const svg = (k) => `<svg viewBox="0 0 24 24"><path d="${P[k]}"/></svg>`;
@@ -145,14 +146,15 @@ function allControllable() {
   return [...ids].filter(ent);
 }
 
-function quickActions(scopeIds) {
+function quickActions(scopeIds, inRoom) {
   const lightsOn = scopeIds.filter((id) => dom(id) === 'light' && ent(id).state !== 'off');
   const covers = scopeIds.filter((id) => dom(id) === 'cover' && ((ent(id).supported_features ?? 2) & 2));
-  const btn = (k, icon, text) => `<button data-quick="${k}">${svg(icon)}<span>${text}</span></button>`;
+  const btn = (k, icon, text) => `<button data-quick="${k}" data-scope="${inRoom ? esc(S.room || '') : ''}">${svg(icon)}<span>${text}</span></button>`;
+  const all = inRoom ? '' : 'כל ';
   const b = [];
-  if (scopeIds.some((id) => dom(id) === 'light')) b.push(btn('lights-off', 'moon', lightsOn.length ? `כיבוי כל האורות (${lightsOn.length})` : 'כיבוי כל האורות'));
-  if (covers.length) b.push(btn('covers-close', 'down', 'סגירת כל התריסים'));
-  if (covers.length) b.push(btn('covers-open', 'up', 'פתיחת כל התריסים'));
+  if (scopeIds.some((id) => dom(id) === 'light')) b.push(btn('lights-off', 'moon', lightsOn.length ? `כיבוי ${all}האורות (${lightsOn.length})` : `כיבוי ${all}האורות`));
+  if (covers.length) b.push(btn('covers-close', 'down', `סגירת ${all}התריסים`));
+  if (covers.length) b.push(btn('covers-open', 'up', `פתיחת ${all}התריסים`));
   return b.length ? `<div class="quick">${b.join('')}</div>` : '';
 }
 
@@ -183,26 +185,96 @@ function roomPicker(list, sel) {
   return `<div class="rooms-pick">${list.map((a) => `<button data-room="${esc(a.id)}" class="${a.id === sel ? 'sel' : ''}">${esc(areaName(a))}</button>`).join('')}</div>`;
 }
 
+const ROOM_IC = {
+  sofa: 'M4 10V7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v3a2 2 0 0 0-2 2v2H6v-2a2 2 0 0 0-2-2zm-2 2a2 2 0 0 1 4 0v4h12v-4a2 2 0 0 1 4 0v6a1 1 0 0 1-1 1h-1v1h-2v-1H6v1H4v-1H3a1 1 0 0 1-1-1z',
+  bed: 'M3 5h2v7h6V8h7a4 4 0 0 1 4 4v7h-2v-3H5v3H3zm5 3.5A2.5 2.5 0 1 1 8 13.5a2.5 2.5 0 0 1 0-5z',
+  pot: 'M5 9h14v8a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3zM3 9h2v2H3zm16 0h2v2h-2zM8 4h2v3H8zm6 0h2v3h-2zM11 3h2v4h-2z',
+  drop: 'M12 2c3 4.5 7 8.5 7 13a7 7 0 0 1-14 0c0-4.5 4-8.5 7-13z',
+  door: 'M5 2h14v20h-2V4H7v18H5zm9 9a1 1 0 1 1 0 2 1 1 0 0 1 0-2z',
+  leaf: 'M20 3C10 3 4 8 4 15c0 2 .5 3.5 1.2 4.6L3 22l1.4 1.4 2.3-2.3C7.8 21.7 9.4 22 11 22c6 0 10-6 9-19zM9 17c2-4 5-7 9-9-3 3-6 6-9 9z',
+  game: 'M7 7h10a5 5 0 0 1 4.9 6l-.8 4a2.6 2.6 0 0 1-4.6 1L14.7 16H9.3l-1.8 2a2.6 2.6 0 0 1-4.6-1l-.8-4A5 5 0 0 1 7 7zm0 3v2H5v2h2v2h2v-2h2v-2H9v-2zm9 1a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm2 2a1 1 0 1 0 0 2 1 1 0 0 0 0-2z',
+  box: 'M3 7l9-5 9 5v10l-9 5-9-5zm2 1.7v7.1l6 3.4v-7.1zm14 0-6 3.4v7.1l6-3.4zM12 4.3 6.1 7.6 12 10.9l5.9-3.3z',
+  table: 'M2 8h20v2h-2v10h-2v-6H6v6H4V10H2z',
+  home: 'M12 3 3 10v10a1 1 0 0 0 1 1h5v-6h6v6h5a1 1 0 0 0 1-1V10z',
+  bolt: 'M13 2 4 14h6l-1 8 9-12h-6z',
+};
+function roomIcon(a) {
+  const n = (a.name + ' ' + a.id).toLowerCase();
+  const k = /living|סלון/.test(n) ? 'sofa' : /kitchen|מטבח/.test(n) ? 'pot' : /dining|אוכל/.test(n) ? 'table'
+    : /bath|restroom|toilet|שירותים|אמבט/.test(n) ? 'drop' : /entr|hall|כניסה|מסדרון/.test(n) ? 'door'
+    : /garden|yard|גינה|מרפסת|balcony/.test(n) ? 'leaf' : /gam|משחק/.test(n) ? 'game' : /storage|מחסן/.test(n) ? 'box'
+    : /bed|room|חדר/.test(n) ? 'bed' : 'home';
+  return `<svg viewBox="0 0 24 24"><path d="${ROOM_IC[k]}"/></svg>`;
+}
+
+function roomSummary(ids) {
+  const es = ids.map(ent).filter(Boolean);
+  const lights = es.filter((e) => TOGGLE.includes(dom(e.id)) && isOn(e)).length;
+  const open = es.filter((e) => dom(e.id) === 'cover' && e.state === 'open').length;
+  const unlocked = es.some((e) => dom(e.id) === 'lock' && e.state !== 'locked');
+  const doorOpen = es.some((e) => dom(e.id) === 'binary_sensor' && e.state === 'on' && !['motion', 'occupancy'].includes(e.device_class));
+  const temp = es.find((e) => dom(e.id) === 'sensor' && e.device_class === 'temperature' && !isNaN(parseFloat(e.state)));
+  const parts = [];
+  if (lights) parts.push(lights === 1 ? 'מכשיר אחד דולק' : `${lights} דולקים`);
+  if (open) parts.push(open === 1 ? 'תריס פתוח' : `${open} תריסים פתוחים`);
+  if (unlocked) parts.push('הדלת לא נעולה');
+  else if (doorOpen) parts.push('דלת פתוחה');
+  return { text: parts.join(' · ') || 'הכול כבוי', on: lights > 0, alert: unlocked || doorOpen, temp: temp ? `${Math.round(parseFloat(temp.state) * 10) / 10}°` : '' };
+}
+
+function roomById(id) {
+  if (id === '_other') return { id: '_other', name: 'פעולות נוספות', entities: S.data.other };
+  return S.data.areas.find((a) => a.id === id);
+}
+
 function viewRooms() {
-  let h = `<h2>כל החדרים</h2>`;
+  const room = S.room && roomById(S.room);
+  if (room) return viewRoom(room);
+  S.room = null;
   const mine = S.data.me.room;
-  const areas = [...S.data.areas].sort((a, b) => (b.id === mine) - (a.id === mine));
+  const areas = S.data.areas.filter((a) => a.entities.length).sort((a, b) => (b.id === mine) - (a.id === mine));
+  let h = `<h2>הבית</h2>`;
+  h += quickActions(allControllable());
+  h += `<div class="room-grid">`;
   for (const a of areas) {
-    const ctrl = a.entities.filter((id) => !SENSOR.includes(dom(id)));
-    if (!a.entities.length) continue;
-    const on = ctrl.filter((id) => isOn(ent(id))).length;
-    h += `<h3>${esc(areaName(a))} ${on ? `<span class="count">${on} דולקים</span>` : ''}</h3>`;
-    h += sensorChips(a.entities);
-    h += grid(a.entities);
+    const sum = roomSummary(a.entities);
+    const n = a.entities.filter((id) => !SENSOR.includes(dom(id))).length;
+    h += `<button class="room-card ${sum.on ? 'on' : ''} ${sum.alert ? 'alert' : ''}" data-open="${esc(a.id)}">
+      <div class="rc-top"><span class="rc-ic">${roomIcon(a)}</span>${sum.temp ? `<span class="rc-temp">${esc(sum.temp)}</span>` : ''}${a.id === mine ? '<span class="rc-mine">שלי</span>' : ''}</div>
+      <div class="rc-name">${esc(areaName(a))}</div>
+      <div class="rc-sum">${esc(sum.text)}</div>
+      <div class="rc-n">${n === 1 ? 'מכשיר אחד' : n + ' מכשירים'}</div>
+    </button>`;
   }
   if (S.data.other.length) {
-    h += `<h3>פעולות ומכשירים בלי חדר <span class="count">רק להורים</span></h3>`;
-    h += grid(S.data.other);
+    h += `<button class="room-card" data-open="_other">
+      <div class="rc-top"><span class="rc-ic"><svg viewBox="0 0 24 24"><path d="${ROOM_IC.bolt}"/></svg></span></div>
+      <div class="rc-name">פעולות נוספות</div><div class="rc-sum">מזגן, טלוויזיה ועוד</div><div class="rc-n">רק להורים</div></button>`;
   }
+  h += `</div>`;
   const empty = S.data.areas.filter((a) => !a.entities.length).map(areaName);
   if (empty.length) h += `<p class="hint">חדרים בלי מכשירים: ${esc(empty.join(', '))}. משייכים מכשיר לחדר ב־Home Assistant (גלגל השיניים של המכשיר ← Area).</p>`;
   return h;
 }
+
+function viewRoom(a) {
+  const name = a.id === '_other' ? a.name : areaName(a);
+  let h = `<div class="room-head"><button class="back" data-back aria-label="חזרה">${svg('back')}<span>הבית</span></button></div>`;
+  h += `<h2>${esc(name)}</h2>`;
+  h += sensorChips(a.entities);
+  h += quickActions(a.entities.filter(ent), true);
+  h += grid(a.entities) || `<div class="hint">אין מכשירים בחדר הזה.</div>`;
+  return h;
+}
+
+function openRoom(id) {
+  S.room = id;
+  history.pushState({ room: id }, '');
+  render(); window.scrollTo(0, 0);
+}
+window.addEventListener('popstate', () => {
+  if (S.room) { S.room = null; render(); window.scrollTo(0, 0); }
+});
 
 function viewFamily() {
   const me = S.data.me;
@@ -344,8 +416,9 @@ async function setMyRoom(areaId) {
   } catch (e) { toast('לא הצלחנו לשמור את החדר'); }
 }
 
-function quick(k) {
-  const scope = allControllable();
+function quick(k, scopeRoom) {
+  const r = scopeRoom && roomById(scopeRoom);
+  const scope = r ? r.entities.filter(ent) : allControllable();
   if (k === 'lights-off') {
     const ids = scope.filter((id) => dom(id) === 'light');
     if (ids.length) act(ids.map((e) => ({ e, s: 'turn_off' })), () => ids.forEach((id) => { ent(id).state = 'off'; }));
@@ -384,8 +457,10 @@ document.addEventListener('click', async (ev) => {
   if (ds.tap) return toggle(ds.tap);
   if (ds.act) { const e = ent(ds.act); return act([{ e: ds.act, s: ds.s }], () => { if (ds.s === 'turn_off') e.state = 'off'; }); }
   if (ds.temp) return bumpTemp(ds.temp, Number(ds.delta));
-  if (ds.quick) return quick(ds.quick);
-  if (ds.tab) { S.tab = ds.tab; render(); window.scrollTo(0, 0); return; }
+  if (ds.quick) return quick(ds.quick, ds.scope);
+  if (ds.open) return openRoom(ds.open);
+  if ('back' in ds) return history.back();
+  if (ds.tab) { if (S.room && ds.tab === 'rooms') { history.back(); return; } if (S.room) { S.room = null; history.back(); } S.tab = ds.tab; render(); window.scrollTo(0, 0); return; }
   if (ds.room) return setMyRoom(ds.room);
   if ('pickroom' in ds) {
     if ($('#pickHead')) return;
