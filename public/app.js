@@ -15,7 +15,7 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const dom = (e) => e.split('.')[0];
 
-const S = { user: null, data: null, tab: 'mine', busy: new Set(), members: [], ok: true, unsubMembers: null };
+const S = { user: null, data: null, tab: null, busy: new Set(), members: [], ok: true, unsubMembers: null };
 
 /* ---------- icons ---------- */
 const P = {
@@ -318,7 +318,7 @@ function viewFamily() {
 
 function render() {
   if (!S.data) return;
-  const v = S.tab === 'rooms' ? viewRooms() : S.tab === 'family' ? viewFamily() : viewMine();
+  const v = (S.tab || 'rooms') === 'rooms' ? viewRooms() : S.tab === 'family' ? viewFamily() : viewMine();
   // keep form input while re-rendering the family tab
   const f = $('#addMember');
   const draft = f ? Object.fromEntries(new FormData(f)) : null;
@@ -337,6 +337,8 @@ async function load() {
   try {
     const r = await haStates();
     S.data = r.data; S.ok = true;
+    // first screen: parents land on the house, children on their own screen
+    if (!S.tab) S.tab = S.data.me.role === 'parent' ? 'rooms' : 'mine';
     if (!S.unsubMembers) watchMembers();
     show('main');
     // don't redraw under someone who is typing or choosing in a form
