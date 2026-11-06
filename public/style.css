@@ -187,7 +187,10 @@ h3 .count { font-size: 13px; color: var(--muted); font-weight: 400; }
 .hs.on { background: var(--on-bg); border-color: transparent; }
 .hs.alert { background: var(--warn-bg); color: var(--warn); border-color: transparent; font-weight: 500; }
 .tablet-foot { color: var(--muted); font-size: 13px; text-align: center; margin-top: 28px; }
-body.tablet [data-tab="family"] { display: none; }
+body.tablet .tabs { display: none; }
+body.tablet .top, body.tablet #view { margin-inline-start: 0; }
+body.tablet #view { padding-bottom: 32px; }
+body.tablet #toast { bottom: 24px; }
 
 /* Tablet sizes */
 @media (min-width: 768px) {

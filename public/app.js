@@ -240,6 +240,11 @@ function viewRooms() {
   const areas = S.data.areas.filter((a) => a.entities.length).sort((a, b) => (b.id === mine) - (a.id === mine));
   let h = isTablet() ? homeStatus() : `<h2>הבית</h2>`;
   h += quickActions(allControllable());
+  if (isTablet()) {
+    // the tablet has no menu: shared favorites sit on the house screen itself
+    const favs = myFavs().filter(ent);
+    if (favs.length) h += `<h3>מועדפים</h3>` + grid(favs) + `<h3>חדרים</h3>`;
+  }
   h += `<div class="room-grid">`;
   for (const a of areas) {
     const sum = roomSummary(a.entities);
@@ -259,7 +264,7 @@ function viewRooms() {
   h += `</div>`;
   const empty = S.data.areas.filter((a) => !a.entities.length).map(areaName);
   if (empty.length) h += `<p class="hint">חדרים בלי מכשירים: ${esc(empty.join(', '))}. משייכים מכשיר לחדר ב־Home Assistant (גלגל השיניים של המכשיר ← Area).</p>`;
-  if (isTablet()) h += `<p class="tablet-foot">טאבלט משותף · <button class="link" data-signout>התנתקות</button></p>`;
+  if (isTablet()) h += `<p class="tablet-foot">טאבלט משותף · לחיצה על ☆ במכשיר בתוך חדר מוסיפה אותו למועדפים · <button class="link" data-signout>התנתקות</button></p>`;
   return h;
 }
 
@@ -391,7 +396,7 @@ async function load() {
     const r = await haStates();
     S.data = r.data; S.ok = true;
     // first screen: parents land on the house, children on their own screen
-    if (!S.tab) S.tab = S.data.me.role === 'child' ? 'mine' : 'rooms';
+    if (!S.tab || S.data.me.role === 'tablet') S.tab = S.data.me.role === 'child' ? 'mine' : 'rooms';
     if (!S.unsubMembers) watchMembers();
     show('main');
     // don't redraw under someone who is typing or choosing in a form
