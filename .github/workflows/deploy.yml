@@ -1,0 +1,28 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install functions deps
+        working-directory: functions
+        run: npm install --no-audit --no-fund
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HOME_APP_F94E4 }}
+      - name: Deploy (hosting, rules, functions)
+        run: |
+          set -o pipefail
+          if ! npx -y firebase-tools@latest deploy --project home-app-f94e4 --non-interactive --force 2>&1 | tee deploy.log; then
+            # Errors become annotations so they can be read without raw logs.
+            grep -iE "error|failed|denied|permission|not found" deploy.log | head -30 | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          fi

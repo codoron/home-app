@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signed() { return request.auth != null && request.auth.token.email_verified == true; }
+    function email() { return request.auth.token.email.lower(); }
+    function sys() { return signed() && email() in ['co.doron@gmail.com']; }
+    function isMember() { return signed() && exists(/databases/$(database)/documents/members/$(email())); }
+    function me() { return get(/databases/$(database)/documents/members/$(email())).data; }
+    function isAdmin() { return sys() || (isMember() && me().get('admin', false) == true); }
+    function isParent() { return isMember() && me().role == 'parent'; }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    // members/{email}: name, role (parent|child), room, favorites, admin, phone
+    match /members/{e} {
+      allow read: if isMember() || sys();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        // everyone edits their own favorites; parents pick their room, a child picks it only once
+        || (signed() && email() == e && changed().hasOnly(['favorites', 'room'])
+            && (!changed().hasAny(['room']) || resource.data.role == 'parent' || resource.data.get('room', null) == null))
+        // parents can move a child to a room
+        || (isParent() && resource.data.role == 'child' && changed().hasOnly(['room']));
+    }
+
+    // config/app: sharedAreas (rooms every child can use)
+    match /config/{doc} {
+      allow read: if isMember();
+      allow write: if isAdmin();
+    }
+  }
+}
