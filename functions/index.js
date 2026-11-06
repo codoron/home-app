@@ -142,13 +142,24 @@ async function view(m) {
   const scripts = Object.keys(byId).filter((e) => dom(e) === 'script');
   const findScript = (re) => scripts.find((e) => re.test(objId(e)));
   const vol = { up: findScript(/tv.*vol.*up|vol.*up/), down: findScript(/tv.*vol.*down|vol.*down/), mute: findScript(/tv.*mute|mute/) };
+  const areaOf = {};
+  for (const a of areas) for (const e of a.entities) areaOf[e] = a.id;
+  const remoteFor = (id) => {
+    const name = (byId[id].attributes.friendly_name || '').toLowerCase();
+    return remotes.find((x) => objId(x) === objId(id)) || remotes.find((x) => (byId[x].attributes.friendly_name || '').toLowerCase() === name);
+  };
+  const tvRemotes = new Set(Object.keys(byId).filter((e) => dom(e) === 'media_player').map(remoteFor).filter(Boolean));
+  // IR blasters (Broadlink) are the remotes that belong to no TV. Their volume scripts only make sense
+  // for a TV in the same room; if no blaster has a room, assume the living room.
+  let irAreas = new Set(remotes.filter((r) => !tvRemotes.has(r) && areaOf[r]).map((r) => areaOf[r]));
+  if (!irAreas.size) irAreas = new Set(areas.filter((a) => /living|סלון/i.test(a.name + ' ' + a.id)).map((a) => a.id));
   for (const id of Object.keys(entities)) {
     if (dom(id) !== 'media_player') continue;
-    const name = (byId[id].attributes.friendly_name || '').toLowerCase();
-    const r = remotes.find((x) => objId(x) === objId(id)) || remotes.find((x) => (byId[x].attributes.friendly_name || '').toLowerCase() === name);
+    const r = remoteFor(id);
     if (!r) continue;
     entities[id].remote = r;
     entities[r] = slim(byId[r]);
+    if (!irAreas.has(areaOf[id])) continue;
     for (const k of ['up', 'down', 'mute']) if (vol[k]) { entities[id]['vol_' + k] = vol[k]; entities[vol[k]] = slim(byId[vol[k]]); }
   }
   // remote entities are controls behind a TV, never tiles of their own
