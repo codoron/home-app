@@ -134,6 +134,7 @@ h3 .count { font-size: 13px; color: var(--muted); font-weight: 400; }
 .avatar { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--on-bg); color: var(--ink); flex: none; }
 .person .who { flex: 1; min-width: 0; }
 .person .who small { display: block; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+.tag.wait { background: var(--on-bg); color: var(--ink); }
 .tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); margin-inline-start: 6px; }
 .form { display: grid; gap: 8px; }
 .form .row { display: flex; gap: 8px; flex-wrap: wrap; }

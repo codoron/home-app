@@ -69,9 +69,14 @@ async function getMember(req) {
   const email = t.email.toLowerCase();
   const ref = db.doc('members/' + email);
   const snap = await ref.get();
-  if (snap.exists) return { email, ...snap.data() };
+  if (snap.exists) {
+    const d = snap.data();
+    // mark that this member has joined (at most once an hour)
+    if (!d.lastSeen || Date.now() - d.lastSeen > 3600 * 1000) ref.update({ lastSeen: Date.now() }).catch(() => {});
+    return { email, ...d };
+  }
   if (SYS.includes(email)) {
-    const m = { name: t.name || 'מנהל', role: 'parent', admin: true, room: null, favorites: [], created: Date.now() };
+    const m = { name: t.name || 'מנהל', role: 'parent', admin: true, room: null, favorites: [], created: Date.now(), lastSeen: Date.now() };
     await ref.set(m);
     return { email, ...m };
   }

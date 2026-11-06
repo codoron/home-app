@@ -218,12 +218,12 @@ function viewFamily() {
       ? `<div class="edit-row">
           <select data-mrole="${esc(m.id)}"><option value="parent" ${m.role === 'parent' ? 'selected' : ''}>הורה</option><option value="child" ${m.role === 'child' ? 'selected' : ''}>ילד/ה</option></select>
           <select data-mroom="${esc(m.id)}">${areaOpts(m.room)}</select>
-          ${m.id !== me.email ? `<button class="btn small danger" data-mdel="${esc(m.id)}">הסרה</button>` : ''}
+          ${m.id !== me.email ? `<button class="btn small" data-wa="${esc(m.id)}">הזמנה בוואטסאפ</button><button class="btn small" data-mail="${esc(m.id)}">במייל</button><button class="btn small danger" data-mdel="${esc(m.id)}">הסרה</button>` : ''}
         </div>`
       : parent && m.role === 'child'
         ? `<div class="edit-row"><select data-mroom="${esc(m.id)}">${areaOpts(m.room)}</select></div>` : '';
     h += `<div class="card"><div class="person"><div class="avatar">${esc((m.name || '?')[0])}</div>
-      <div class="who"><b>${esc(m.name)}</b><span class="tag">${m.role === 'parent' ? 'הורה' : 'ילד/ה'}</span><small>${esc(nameOfArea(m.room))} · ${esc(m.id)}</small></div></div>${edit}</div>`;
+      <div class="who"><b>${esc(m.name)}</b><span class="tag">${m.role === 'parent' ? 'הורה' : 'ילד/ה'}</span>${m.lastSeen ? '' : '<span class="tag wait">עוד לא נכנס/ה</span>'}<small>${esc(nameOfArea(m.room))} · ${esc(m.id)}</small></div></div>${edit}</div>`;
   }
   h += `</div>`;
 
@@ -265,6 +265,7 @@ async function load() {
   try {
     const r = await haStates();
     S.data = r.data; S.ok = true;
+    if (!S.unsubMembers) watchMembers();
     show('main');
     // don't redraw under someone who is typing or choosing in a form
     const a = document.activeElement;
@@ -355,6 +356,17 @@ function quick(k) {
 }
 
 /* ---------- members ---------- */
+function inviteText(m) {
+  return `היי ${m.name}! 🏠\nהוזמנת לאפליקציה "הבית שלנו", שבה שולטים בבית החכם.\n` +
+    `נכנסים עם חשבון ה־Google של ${m.id}:\n${location.origin}\n` +
+    `טיפ: בטלפון אפשר להוסיף את האפליקציה למסך הבית (באייפון דרך כפתור השיתוף ב־Safari, באנדרואיד דרך תפריט Chrome).`;
+}
+function invite(m, how) {
+  const text = inviteText(m);
+  if (how === 'wa') window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
+  else location.href = `mailto:${encodeURIComponent(m.id)}?subject=${encodeURIComponent('הזמנה ל"הבית שלנו"')}&body=${encodeURIComponent(text)}`;
+}
+
 function watchMembers() {
   if (S.unsubMembers) S.unsubMembers();
   S.unsubMembers = onSnapshot(collection(db, 'members'), (snap) => {
@@ -383,6 +395,11 @@ document.addEventListener('click', async (ev) => {
   }
   if ('signout' in ds) { await signOut(auth); return; }
   if ('retry' in ds) return load();
+  if (ds.wa || ds.mail) {
+    const m = S.members.find((x) => x.id === (ds.wa || ds.mail));
+    if (m) invite(m, ds.wa ? 'wa' : 'mail');
+    return;
+  }
   if (ds.mdel && confirm('להסיר את בן המשפחה?')) {
     try { await deleteDoc(doc(db, 'members', ds.mdel)); } catch { toast('ההסרה נכשלה'); }
   }
@@ -417,6 +434,7 @@ document.addEventListener('submit', async (ev) => {
     await setDoc(doc(db, 'members', email), { name: f.name.trim(), role: f.role, room: f.room || null, favorites: [], admin: false, created: Date.now() });
     ev.target.reset();
     toast(`${f.name} נוספ/ה ✓`);
+    if (confirm(`לשלוח ל${f.name} הזמנה בוואטסאפ?`)) invite({ id: email, name: f.name.trim() }, 'wa');
   } catch (e) { toast('ההוספה נכשלה'); }
 });
 
@@ -438,9 +456,10 @@ function toast(msg) { const el = $('#toast'); el.textContent = msg; el.hidden = 
 getRedirectResult(auth).catch(() => {});
 onAuthStateChanged(auth, (u) => {
   S.user = u; S.data = null;
-  if (!u) { if (S.unsubMembers) S.unsubMembers(); show('login'); return; }
+  if (S.unsubMembers) { S.unsubMembers(); S.unsubMembers = null; }
+  if (!u) { show('login'); return; }
   show('loading');
-  load().then(() => { if (S.data) watchMembers(); });
+  load();
 });
 
 setInterval(() => { if (S.user && S.data && !document.hidden && !S.busy.size) load(); }, 8000);
