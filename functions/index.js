@@ -101,10 +101,18 @@ function slim(s) {
 }
 
 // Builds what this member may see: { areas:[{id,name,entities}], other:[ids], entities:{id:slim} }
+let cfgCache = null, cfgAt = 0;
+async function getCfg() {
+  if (cfgCache && Date.now() - cfgAt < 60 * 1000) return cfgCache;
+  const snap = await db.doc('config/app').get();
+  cfgCache = snap.exists ? snap.data() : {}; cfgAt = Date.now();
+  return cfgCache;
+}
+
 async function view(m) {
-  const [areas, states, cfgSnap] = await Promise.all([getAreas(), ha('/api/states'), db.doc('config/app').get()]);
-  const cfg = cfgSnap.exists ? cfgSnap.data() : {};
-  const parent = m.role === 'parent';
+  const [areas, states, cfg] = await Promise.all([getAreas(), ha('/api/states'), getCfg()]);
+  // the shared living-room tablet controls the whole house, like a parent
+  const parent = m.role === 'parent' || m.role === 'tablet';
   const byId = {};
   for (const s of states) if (shown(s)) byId[s.entity_id] = s;
   const okEntity = (e) => byId[e] && (parent || !PARENT_ONLY.includes(dom(e)));

@@ -15,8 +15,8 @@ Family smart-home web app over Doron's Home Assistant. Separate from family-app 
 ## Architecture
 - `public/` static, Firebase JS SDK 10.12.2 from gstatic. Bump `?v=` in index.html when app.js/style.css change.
 - `functions/index.js` (Node 22, europe-west1): `haStates` (areas via `/api/template`, states via `/api/states`, filtered per member) and `haCall` (whitelisted domain/services, permission-checked). Secrets `HA_URL`, `HA_TOKEN`.
-- Firestore: `members/{email}` {name, role parent|child, room (HA area id), favorites[], admin, extraAreas?}; `config/app` {sharedAreas[]}.
-- Permissions: parents all; children own room + sharedAreas (+extraAreas); `lock` is parent-only. System admin co.doron@gmail.com (functions `SYS`, rules `sys()`, `public/config.js`).
+- Firestore: `members/{email}` {name, role parent|child|tablet, room (HA area id), favorites[], admin, extraAreas?}; `config/app` {sharedAreas[]}.
+- Permissions: parents and the shared living-room `tablet` account all (tablet: clock/status header, wake lock, auto-return to house after 60s idle, no family tab, slower polling when idle); children own room + sharedAreas (+extraAreas); `lock` is parent-only. System admin co.doron@gmail.com (functions `SYS`, rules `sys()`, `public/config.js`).
 - Hebrew area names: `AREA_NAMES` in `public/config.js`, keyed by HA area name.
 
 ## Testing locally

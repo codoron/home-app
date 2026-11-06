@@ -177,3 +177,52 @@ h3 .count { font-size: 13px; color: var(--muted); font-weight: 400; }
 .back { display: inline-flex; align-items: center; gap: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 999px;
   padding: 7px 14px 7px 12px; cursor: pointer; font-weight: 500; color: var(--ink); }
 .back svg { width: 18px; height: 18px; fill: currentColor; transform: scaleX(-1); }
+
+/* Shared tablet: clock + house status */
+.panel { margin: 14px 0 6px; }
+.panel .clock { font-size: 64px; font-weight: 600; line-height: 1; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+.panel .date { color: var(--muted); font-size: 18px; margin-top: 6px; }
+.hs-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.hs { font-size: 15px; padding: 6px 14px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); }
+.hs.on { background: var(--on-bg); border-color: transparent; }
+.hs.alert { background: var(--warn-bg); color: var(--warn); border-color: transparent; font-weight: 500; }
+.tablet-foot { color: var(--muted); font-size: 13px; text-align: center; margin-top: 28px; }
+body.tablet [data-tab="family"] { display: none; }
+
+/* Tablet sizes */
+@media (min-width: 768px) {
+  #view { max-width: 1400px; padding-inline: 28px; }
+  h2 { font-size: 30px; }
+  h3 { font-size: 20px; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+  .tile { min-height: 150px; padding: 18px; border-radius: 22px; }
+  .tile .ic { width: 48px; height: 48px; border-radius: 14px; }
+  .tile .ic svg { width: 28px; height: 28px; }
+  .tile .nm { font-size: 18px; }
+  .tile .st { font-size: 15px; }
+  .tile .ctl button { padding: 12px 0; }
+  .tile .ctl button svg { width: 22px; height: 22px; }
+  .tile .fav { width: 48px; height: 48px; }
+  .tile .fav svg { width: 28px; height: 28px; }
+  .room-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+  .room-card { min-height: 170px; padding: 18px; border-radius: 24px; }
+  .room-card .rc-ic { width: 52px; height: 52px; border-radius: 16px; }
+  .room-card .rc-ic svg { width: 30px; height: 30px; }
+  .room-card .rc-name { font-size: 21px; }
+  .room-card .rc-sum { font-size: 15px; }
+  .quick button { padding: 12px 18px; font-size: 16px; }
+  .back { padding: 10px 18px 10px 16px; font-size: 17px; }
+  .chip { font-size: 15px; padding: 6px 12px; }
+}
+
+/* Wide / landscape: side navigation on the right */
+@media (min-width: 1000px) {
+  .tabs { top: 0; bottom: 0; inset-inline-start: 0; inset-inline-end: auto; width: 104px; flex-direction: column; justify-content: center; gap: 10px;
+    border-top: 0; border-inline-end: 1px solid var(--line); padding: 16px 10px; }
+  .tabs button { flex: none; width: 100%; padding: 14px 6px; font-size: 14px; }
+  .tabs svg { width: 28px; height: 28px; }
+  .top, #view { margin-inline-start: 104px; }
+  #view { padding-bottom: 40px; }
+  #toast { bottom: 24px; }
+  .panel .clock { font-size: 80px; }
+}

@@ -160,6 +160,11 @@ function quickActions(scopeIds, inRoom) {
 
 function viewMine() {
   const me = S.data.me;
+  if (isTablet()) {
+    const favs = myFavs().filter(ent);
+    return `<h2>המועדפים של הבית</h2>` + quickActions(allControllable()) +
+      (favs.length ? grid(favs) : `<div class="hint" style="margin-top:14px">אין עדיין מועדפים. לחצו על ☆ בפינה של מכשיר בכל חדר כדי להוסיף אותו לכאן.</div>`);
+  }
   const room = S.data.areas.find((a) => a.id === me.room) || null;
   const favs = myFavs().filter(ent);
   let h = `<h2>שלום, ${esc(me.name.split(' ')[0])}</h2>`;
@@ -233,7 +238,7 @@ function viewRooms() {
   S.room = null;
   const mine = S.data.me.room;
   const areas = S.data.areas.filter((a) => a.entities.length).sort((a, b) => (b.id === mine) - (a.id === mine));
-  let h = `<h2>הבית</h2>`;
+  let h = isTablet() ? homeStatus() : `<h2>הבית</h2>`;
   h += quickActions(allControllable());
   h += `<div class="room-grid">`;
   for (const a of areas) {
@@ -254,6 +259,7 @@ function viewRooms() {
   h += `</div>`;
   const empty = S.data.areas.filter((a) => !a.entities.length).map(areaName);
   if (empty.length) h += `<p class="hint">חדרים בלי מכשירים: ${esc(empty.join(', '))}. משייכים מכשיר לחדר ב־Home Assistant (גלגל השיניים של המכשיר ← Area).</p>`;
+  if (isTablet()) h += `<p class="tablet-foot">טאבלט משותף · <button class="link" data-signout>התנתקות</button></p>`;
   return h;
 }
 
@@ -288,14 +294,14 @@ function viewFamily() {
   for (const m of S.members) {
     const edit = isAdmin
       ? `<div class="edit-row">
-          <select data-mrole="${esc(m.id)}"><option value="parent" ${m.role === 'parent' ? 'selected' : ''}>הורה</option><option value="child" ${m.role === 'child' ? 'selected' : ''}>ילד/ה</option></select>
+          <select data-mrole="${esc(m.id)}">${Object.entries(ROLE).map(([k, v]) => `<option value="${k}" ${m.role === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
           <select data-mroom="${esc(m.id)}">${areaOpts(m.room)}</select>
           ${m.id !== me.email ? `<button class="btn small" data-wa="${esc(m.id)}">הזמנה בוואטסאפ</button><button class="btn small" data-mail="${esc(m.id)}">במייל</button><button class="btn small danger" data-mdel="${esc(m.id)}">הסרה</button>` : ''}
         </div>`
       : parent && m.role === 'child'
         ? `<div class="edit-row"><select data-mroom="${esc(m.id)}">${areaOpts(m.room)}</select></div>` : '';
     h += `<div class="card"><div class="person"><div class="avatar">${esc((m.name || '?')[0])}</div>
-      <div class="who"><b>${esc(m.name)}</b><span class="tag">${m.role === 'parent' ? 'הורה' : 'ילד/ה'}</span>${m.lastSeen ? '' : '<span class="tag wait">עוד לא נכנס/ה</span>'}<small>${esc(nameOfArea(m.room))} · ${esc(m.id)}</small></div></div>${edit}</div>`;
+      <div class="who"><b>${esc(m.name)}</b><span class="tag">${ROLE[m.role] || m.role}</span>${m.lastSeen ? '' : '<span class="tag wait">עוד לא נכנס/ה</span>'}<small>${esc(nameOfArea(m.room))} · ${esc(m.id)}</small></div></div>${edit}</div>`;
   }
   h += `</div>`;
 
@@ -303,7 +309,7 @@ function viewFamily() {
     h += `<h3>הוספת בן משפחה</h3>
       <form class="card form" id="addMember">
         <div class="row"><input name="name" placeholder="שם" required><input name="email" type="email" placeholder="מייל Google" required dir="ltr"></div>
-        <div class="row"><select name="role"><option value="child">ילד/ה</option><option value="parent">הורה</option></select><select name="room">${areaOpts('')}</select></div>
+        <div class="row"><select name="role"><option value="child">ילד/ה</option><option value="parent">הורה</option><option value="tablet">טאבלט משותף</option></select><select name="room">${areaOpts('')}</select></div>
         <button class="btn primary">הוספה</button>
         <small class="hello">אחרי ההוספה שלחו להם את הכתובת: ${esc(location.origin)}</small>
       </form>`;
@@ -325,9 +331,56 @@ function render() {
   $('#view').innerHTML = v;
   if (draft) { const nf = $('#addMember'); if (nf) for (const [k, val] of Object.entries(draft)) nf.elements[k].value = val; }
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === S.tab));
+  document.body.classList.toggle('tablet', isTablet());
+  const mineLabel = document.querySelector('[data-tab="mine"] span');
+  if (mineLabel) mineLabel.textContent = isTablet() ? 'מועדפים' : 'שלי';
+  if (isTablet()) { tickClock(); keepAwake(); }
   $('#status').className = 'status' + (S.ok ? '' : ' bad');
   $('#status').innerHTML = `<span class="dot"></span>${S.ok ? 'מחובר לבית' : 'אין חיבור לבית'}`;
 }
+
+
+/* ---------- shared tablet (living-room panel) ---------- */
+const ROLE = { parent: 'הורה', child: 'ילד/ה', tablet: 'טאבלט משותף' };
+const isTablet = () => !!(S.data && S.data.me.role === 'tablet');
+
+function homeStatus() {
+  const es = allControllable().map(ent);
+  const lights = es.filter((e) => TOGGLE.includes(dom(e.id)) && isOn(e)).length;
+  const open = es.filter((e) => dom(e.id) === 'cover' && e.state === 'open').length;
+  const locks = es.filter((e) => dom(e.id) === 'lock');
+  const chips = [];
+  chips.push(`<span class="hs ${lights ? 'on' : ''}">${lights ? `${lights} דולקים` : 'הכול כבוי'}</span>`);
+  if (open) chips.push(`<span class="hs">${open === 1 ? 'תריס אחד פתוח' : `${open} תריסים פתוחים`}</span>`);
+  for (const l of locks) chips.push(`<span class="hs ${l.state === 'locked' ? '' : 'alert'}">${esc(l.name)}: ${esc(stateText(l))}</span>`);
+  return `<div class="panel"><div class="clock" id="clock"></div><div class="date" id="date"></div><div class="hs-row">${chips.join('')}</div></div>`;
+}
+function tickClock() {
+  const c = document.getElementById('clock'), d = document.getElementById('date');
+  if (!c) return;
+  const now = new Date();
+  c.textContent = now.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+  d.textContent = now.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+setInterval(tickClock, 15000);
+
+// keep the screen on
+let wakeLock = null;
+async function keepAwake() {
+  if (!isTablet() || document.hidden || wakeLock || !('wakeLock' in navigator)) return;
+  try { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } catch { /* not allowed */ }
+}
+
+// back to the house overview after a minute without touch
+let lastTouch = Date.now();
+for (const ev of ['pointerdown', 'keydown', 'scroll']) addEventListener(ev, () => { lastTouch = Date.now(); keepAwake(); }, { passive: true });
+setInterval(() => {
+  if (!isTablet() || Date.now() - lastTouch < 60000) return;
+  if (S.room || S.tab !== 'rooms') {
+    if (S.room) { S.room = null; history.back(); }
+    S.tab = 'rooms'; render(); window.scrollTo(0, 0);
+  }
+}, 5000);
 
 /* ---------- data ---------- */
 let loading = false;
@@ -338,7 +391,7 @@ async function load() {
     const r = await haStates();
     S.data = r.data; S.ok = true;
     // first screen: parents land on the house, children on their own screen
-    if (!S.tab) S.tab = S.data.me.role === 'parent' ? 'rooms' : 'mine';
+    if (!S.tab) S.tab = S.data.me.role === 'child' ? 'mine' : 'rooms';
     if (!S.unsubMembers) watchMembers();
     show('main');
     // don't redraw under someone who is typing or choosing in a form
@@ -542,5 +595,11 @@ onAuthStateChanged(auth, (u) => {
   load();
 });
 
-setInterval(() => { if (S.user && S.data && !document.hidden && !S.busy.size) load(); }, 8000);
+let lastPoll = 0;
+setInterval(() => {
+  if (!S.user || !S.data || document.hidden || S.busy.size) return;
+  const idle = isTablet() && Date.now() - lastTouch > 120000;
+  if (Date.now() - lastPoll < (idle ? 20000 : 8000)) return;
+  lastPoll = Date.now(); load();
+}, 2000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && S.user) load(); });
