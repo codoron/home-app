@@ -99,7 +99,7 @@ function tile(id, opts = {}) {
   if (S.busy.has(id)) cls.push('busy');
   if (na) cls.push('na');
   const star = opts.noFav || SENSOR.includes(d) ? '' :
-    `<button class="fav ${fav ? 'is' : ''}" data-fav="${esc(id)}" aria-label="מועדף">${svg('star')}</button>`;
+    `<button class="fav ${fav ? 'is' : ''}" data-fav="${esc(id)}" aria-label="${fav ? 'הסרה מהמועדפים' : 'הוספה למועדפים'}">${svg('star')}</button>`;
   const head = `<div class="ic">${svg(iconFor(e))}</div>`;
   const label = `<div><div class="nm">${esc(e.name)}</div><div class="st">${esc(stateText(e))}</div></div>`;
 
