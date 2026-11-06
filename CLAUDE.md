@@ -15,8 +15,9 @@ Family smart-home web app over Doron's Home Assistant. Separate from family-app 
 ## Architecture
 - `public/` static, Firebase JS SDK 10.12.2 from gstatic. Bump `?v=` in index.html when app.js/style.css change.
 - `functions/index.js` (Node 22, europe-west1): `haStates` (areas via `/api/template`, states via `/api/states`, filtered per member) and `haCall` (whitelisted domain/services, permission-checked). Secrets `HA_URL`, `HA_TOKEN`.
-- Firestore: `members/{email}` {name, role parent|child|tablet, room (HA area id), favorites[], admin, extraAreas?}; `config/app` {sharedAreas[]}.
+- Firestore: `members/{email}` {name, role parent|child|tablet, room (HA area id), favorites[], admin, extraAreas?}; `config/app` {sharedAreas[], channels[{n,name}]}.
 - Permissions: parents and the shared living-room `tablet` account all (tablet: clock/status header, wake lock, auto-return to house after 60s idle, no family tab, slower polling when idle); children own room + sharedAreas (+extraAreas); `lock` is parent-only. System admin co.doron@gmail.com (functions `SYS`, rules `sys()`, `public/config.js`).
+- TV remote: a `media_player` gets `remote` (Android TV Remote entity with the same object id/name) and `vol_up/vol_down/vol_mute` (Broadlink TV volume scripts, matched by object id). Tapping it opens the remote sheet. `remote.send_command` only accepts keys in `REMOTE_KEYS`. The Yes box ignores CHANNEL_UP and DPAD_UP opens its menu: channels change by sending digits (delay 0.3s). Shared channel list in `config/app.channels` (parents edit).
 - Hebrew area names: `AREA_NAMES` in `public/config.js`, keyed by HA area name.
 
 ## Testing locally

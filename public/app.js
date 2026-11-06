@@ -41,6 +41,9 @@ const P = {
   flame: 'M12 2s6 5 6 11a6 6 0 0 1-12 0c0-3 2-5 2-5s0 3 2 4c0-5 2-10 2-10z',
   fridge: 'M6 2h12a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm1 2v5h10V4zm0 7v9h10v-9zM8 5h2v3H8zm0 7h2v4H8z',
   motion: 'M13 4a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM9.8 7.4 7 8.9V13H5V7.7L10.5 5c.9-.4 2-.1 2.5.8l1 2c.7 1.4 2.1 2.2 3.6 2.2H19v2h-1.4a6.3 6.3 0 0 1-4.3-1.7l-.7 3.3L15 15.2V22h-2v-5.6l-2.4-2.1L9.3 22H7.2z',
+  right: 'M9 5l8 7-8 7z', left: 'M15 5 7 12l8 7z',
+  mute: 'M3 9h4l5-4v14l-5-4H3zm13.6 0L15 10.6 16.4 12 15 13.4 16.6 15l1.4-1.4 1.4 1.4 1.6-1.6-1.4-1.4L21 10.6 19.4 9 18 10.4z',
+  home: 'M12 3 3 10v10a1 1 0 0 0 1 1h5v-6h6v6h5a1 1 0 0 0 1-1V10z',
   moon: 'M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z',
 };
 const svg = (k) => `<svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="${P[k] || P.power}"/></svg>`;
@@ -75,6 +78,7 @@ const SENSOR = ['sensor', 'binary_sensor'];
 function stateText(e) {
   const d = dom(e.id), s = e.state;
   if (s === 'unavailable' || s === 'unknown') return 'לא זמין';
+  if (e.remote) return (s === 'off' || s === 'standby' ? 'כבוי' : 'דולק') + ' · שלט';
   if (TOGGLE.includes(d)) return s === 'off' ? 'כבוי' : 'דולק';
   if (d === 'cover') {
     const t = { open: 'פתוח', closed: 'סגור', opening: 'נפתח…', closing: 'נסגר…' }[s] || s;
@@ -312,6 +316,7 @@ function openRoom(id) {
   render(); window.scrollTo(0, 0);
 }
 window.addEventListener('popstate', () => {
+  if (S.remote) { closeRemote(false); return; }
   if (S.room) { S.room = null; render(); window.scrollTo(0, 0); }
 });
 
@@ -365,6 +370,7 @@ function render() {
   if (draft) { const nf = $('#addMember'); if (nf) for (const [k, val] of Object.entries(draft)) nf.elements[k].value = val; }
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === S.tab));
   document.body.classList.toggle('tablet', isTablet());
+  if (S.remote && !R.edit && !R.num) renderRemote();
   const mineLabel = document.querySelector('[data-tab="mine"] span');
   if (mineLabel) mineLabel.textContent = isTablet() ? 'מועדפים' : 'שלי';
   if (isTablet()) { tickClock(); keepAwake(); }
@@ -409,11 +415,150 @@ let lastTouch = Date.now();
 for (const ev of ['pointerdown', 'keydown', 'scroll']) addEventListener(ev, () => { lastTouch = Date.now(); keepAwake(); }, { passive: true });
 setInterval(() => {
   if (!isTablet() || Date.now() - lastTouch < 60000) return;
+  if (S.remote) { closeRemote(true); return; }
   if (S.room || S.tab !== 'rooms') {
     if (S.room) { S.room = null; history.back(); }
     S.tab = 'rooms'; render(); window.scrollTo(0, 0);
   }
 }, 5000);
+
+
+/* ---------- TV remote (Android TV Remote + Broadlink volume) ---------- */
+const R = { num: '', edit: false };
+const canEditChannels = () => S.data && S.data.me.role === 'parent';
+
+function openRemote(id) {
+  S.remote = id; R.num = ''; R.edit = false;
+  history.pushState({ remote: id }, '');
+  let el = document.getElementById('remote');
+  if (!el) { el = document.createElement('div'); el.id = 'remote'; document.body.appendChild(el); }
+  renderRemote();
+  requestAnimationFrame(() => el.classList.add('open'));
+}
+function closeRemote(viaHistory) {
+  const el = document.getElementById('remote');
+  S.remote = null;
+  if (el) el.classList.remove('open');
+  if (viaHistory) history.back();
+}
+
+function renderRemote() {
+  const el = document.getElementById('remote');
+  if (!el || !S.remote) return;
+  const e = ent(S.remote);
+  if (!e) { closeRemote(true); return; }
+  const on = !['off', 'standby', 'unavailable', 'unknown'].includes(e.state);
+  const k = (key, inner, cls = '', label = '') => `<button class="rk ${cls}" data-key="${key}" aria-label="${label}">${inner}</button>`;
+  const vol = (ent(e.vol_down) || ent(e.vol_up))
+    ? `<div class="r-sec"><span>ווליום</span></div><div class="r-row r-vol">
+        ${e.vol_down ? `<button class="rk" data-vol="${esc(e.vol_down)}" aria-label="ווליום למטה">${svg('minus')}</button>` : ''}
+        ${e.vol_mute ? `<button class="rk" data-vol="${esc(e.vol_mute)}" aria-label="השתקה">${svg('mute')}</button>` : ''}
+        ${e.vol_up ? `<button class="rk" data-vol="${esc(e.vol_up)}" aria-label="ווליום למעלה">${svg('plus')}</button>` : ''}
+      </div>` : '';
+  const channels = S.data.channels || [];
+  const chHtml = R.edit
+    ? `<div class="ch-edit">${channels.map((c, i) => `<div class="ch-row">
+          <input data-chname="${i}" value="${esc(c.name)}" placeholder="שם">
+          <input data-chnum="${i}" value="${esc(c.n)}" inputmode="numeric" placeholder="מספר" dir="ltr">
+          <button class="btn small" data-chup="${i}" aria-label="למעלה">${svg('up')}</button>
+          <button class="btn small danger" data-chdel="${i}" aria-label="הסרה">✕</button></div>`).join('')}
+        <div class="ch-actions"><button class="btn small" data-chadd>+ ערוץ</button><button class="btn small primary" data-chsave>שמירה</button></div></div>`
+    : `<div class="ch-grid">${channels.map((c) => `<button class="ch" data-ch="${esc(c.n)}"><b>${esc(c.n)}</b><span>${esc(c.name)}</span></button>`).join('')}</div>`;
+
+  el.innerHTML = `<div class="r-backdrop" data-rclose></div>
+  <div class="r-sheet" role="dialog" aria-label="שלט">
+    <div class="r-head">
+      <div class="r-title"><span class="h-ic sm">${svg('tv')}</span><div><b>${esc(e.name)}</b><small>${on ? 'דולק' : 'כבוי'}</small></div></div>
+      <button class="rk power ${on ? 'on' : ''}" data-power aria-label="הפעלה וכיבוי">${svg('power')}</button>
+      <button class="r-x" data-rclose aria-label="סגירה">×</button>
+    </div>
+    <div class="r-body">
+      <div class="r-ch">
+        <div class="r-sec"><span>ערוצים</span>${canEditChannels() ? `<button class="link" data-chedit>${R.edit ? 'ביטול' : 'עריכה'}</button>` : ''}</div>
+        ${chHtml}
+      </div>
+      <div class="r-num">
+        <div class="r-sec"><span>מספר ערוץ</span></div>
+        <div class="numpad">
+          <div class="num-display">${esc(R.num) || '<span>הקלידו מספר</span>'}</div>
+          ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button class="rk" data-digit="${n}">${n}</button>`).join('')}
+          <button class="rk" data-numdel aria-label="מחיקה">⌫</button>
+          <button class="rk" data-digit="0">0</button>
+          <button class="rk go" data-numgo>מעבר</button>
+        </div>
+      </div>
+      <div class="r-nav">
+        ${vol}
+        <div class="r-sec"><span>ניווט</span></div>
+        <div class="dpad">
+          ${k('DPAD_UP', svg('up'), 'u', 'למעלה')}
+          ${k('DPAD_RIGHT', svg('right'), 'r', 'ימינה')}
+          ${k('DPAD_CENTER', 'OK', 'ok', 'אישור')}
+          ${k('DPAD_LEFT', svg('left'), 'l', 'שמאלה')}
+          ${k('DPAD_DOWN', svg('down'), 'd', 'למטה')}
+        </div>
+        <div class="r-row">
+          ${k('BACK', `${svg('back')}<span>חזרה</span>`, 'wide', 'חזרה')}
+          ${k('HOME', `${svg('home')}<span>בית</span>`, 'wide', 'בית')}
+          ${k('MEDIA_PLAY_PAUSE', `${svg('play')}<span>נגן/השהה</span>`, 'wide', 'נגן או השהה')}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+let keyQueue = Promise.resolve();
+function sendKeys(keys) {
+  const e = ent(S.remote);
+  if (!e || !e.remote) return;
+  if (navigator.vibrate) navigator.vibrate(8);
+  // keep presses in order, without blocking the screen
+  keyQueue = keyQueue.then(() => haCall({ calls: [{ e: e.remote, s: 'send_command', data: { command: keys } }] }))
+    .catch((err) => toast(err.message || 'הפקודה לא נשלחה'));
+}
+
+async function saveChannels(list) {
+  S.data.channels = list;
+  try { await setDoc(doc(db, 'config', 'app'), { channels: list }, { merge: true }); toast('הערוצים נשמרו ✓'); }
+  catch { toast('שמירת הערוצים נכשלה'); }
+}
+function readChannelEdits() {
+  return (S.data.channels || []).map((c, i) => ({
+    name: (document.querySelector(`[data-chname="${i}"]`) || {}).value?.trim() || c.name,
+    n: ((document.querySelector(`[data-chnum="${i}"]`) || {}).value || c.n).replace(/\D/g, '').slice(0, 4),
+  }));
+}
+
+function remoteClick(t, ev) {
+  const ds = t.dataset;
+  if ('rclose' in ds) return closeRemote(true);
+  if (ds.key) return sendKeys([ds.key]);
+  if (ds.ch) return sendKeys(ds.ch.split(''));
+  if (ds.digit) { if (R.num.length < 4) R.num += ds.digit; return renderRemote(); }
+  if ('numdel' in ds) { R.num = R.num.slice(0, -1); return renderRemote(); }
+  if ('numgo' in ds) { if (R.num) { sendKeys(R.num.split('')); R.num = ''; renderRemote(); } return; }
+  if (ds.vol) { if (navigator.vibrate) navigator.vibrate(8); haCall({ calls: [{ e: ds.vol, s: 'turn_on' }] }).catch((err) => toast(err.message || 'הפקודה לא נשלחה')); return; }
+  if ('power' in ds) {
+    const e = ent(S.remote);
+    const on = !['off', 'standby', 'unavailable', 'unknown'].includes(e.state);
+    e.state = on ? 'off' : 'on';
+    renderRemote();
+    act([{ e: e.remote, s: on ? 'turn_off' : 'turn_on' }]);
+    return;
+  }
+  if ('chedit' in ds) { R.edit = !R.edit; return renderRemote(); }
+  if ('chadd' in ds) { S.data.channels = [...readChannelEdits(), { name: '', n: '' }]; return renderRemote(); }
+  if (ds.chdel) { S.data.channels = readChannelEdits().filter((_, i) => i !== Number(ds.chdel)); return renderRemote(); }
+  if (ds.chup) {
+    const i = Number(ds.chup), l = readChannelEdits();
+    if (i > 0) [l[i - 1], l[i]] = [l[i], l[i - 1]];
+    S.data.channels = l; return renderRemote();
+  }
+  if ('chsave' in ds) {
+    const list = readChannelEdits().filter((c) => c.n);
+    R.edit = false; saveChannels(list); return renderRemote();
+  }
+}
 
 /* ---------- data ---------- */
 let loading = false;
@@ -461,6 +606,7 @@ async function act(calls, optimistic) {
 
 function toggle(id) {
   const e = ent(id), d = dom(id);
+  if (e.remote) return openRemote(id);
   if (RUN.includes(d)) {
     act([{ e: id, s: d === 'button' ? 'press' : 'turn_on' }]).then((ok) => ok && toast(`✓ ${e.name}`));
     return;
@@ -538,10 +684,11 @@ function watchMembers() {
 
 /* ---------- events ---------- */
 document.addEventListener('click', async (ev) => {
-  const t = ev.target.closest('button, [data-tap], label');
+  const t = ev.target.closest('button, [data-tap], label, [data-rclose]');
   if (!t) return;
   const ds = t.dataset;
   if (ds.fav) { ev.stopPropagation(); return toggleFav(ds.fav); }
+  if (t.closest('#remote')) return remoteClick(t, ev);
   if (ds.tap) return toggle(ds.tap);
   if (ds.act) { const e = ent(ds.act); return act([{ e: ds.act, s: ds.s }], () => { if (ds.s === 'turn_off') e.state = 'off'; }); }
   if (ds.temp) return bumpTemp(ds.temp, Number(ds.delta));

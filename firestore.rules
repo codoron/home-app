@@ -26,6 +26,9 @@ service cloud.firestore {
     match /config/{doc} {
       allow read: if isMember();
       allow write: if isAdmin();
+      // parents edit the shared TV channel list
+      allow create: if isParent() && request.resource.data.keys().hasOnly(['channels']);
+      allow update: if isParent() && changed().hasOnly(['channels']);
     }
   }
 }

@@ -29,7 +29,15 @@ const SERVICES = {
   scene: ['turn_on'],
   button: ['press'],
   climate: ['turn_on', 'turn_off', 'set_temperature', 'set_hvac_mode'],
+  remote: ['send_command', 'turn_on', 'turn_off'],
 };
+// Keys the TV remote may send (Android TV Remote). Nothing else gets through.
+const REMOTE_KEYS = new Set(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+  'DPAD_UP', 'DPAD_DOWN', 'DPAD_LEFT', 'DPAD_RIGHT', 'DPAD_CENTER', 'BACK', 'HOME', 'MENU',
+  'MEDIA_PLAY_PAUSE', 'MEDIA_PLAY', 'MEDIA_PAUSE', 'MEDIA_STOP', 'MEDIA_REWIND', 'MEDIA_FAST_FORWARD',
+  'VOLUME_UP', 'VOLUME_DOWN', 'VOLUME_MUTE', 'POWER', 'GUIDE', 'INFO']);
+const DEFAULT_CHANNELS = [{ n: '11', name: 'כאן 11' }, { n: '12', name: 'קשת 12' }, { n: '13', name: 'רשת 13' }];
+const objId = (e) => e.split('.')[1];
 const READ_ONLY = { binary_sensor: ['door', 'window', 'opening', 'garage_door', 'motion', 'occupancy'], sensor: ['temperature', 'humidity'] };
 const PARENT_ONLY = ['lock'];
 
@@ -127,7 +135,28 @@ async function view(m) {
   const entities = {};
   for (const a of outAreas) for (const e of a.entities) entities[e] = slim(byId[e]);
   for (const e of other) entities[e] = slim(byId[e]);
-  return { areas: outAreas, other, entities, allAreas: areas.map((a) => ({ id: a.id, name: a.name })), sharedAreas: cfg.sharedAreas || [] };
+
+  // A TV player gets its remote (same device name) and the Broadlink TV volume scripts.
+  // Whoever may use the player may use these too, even if they sit outside their rooms.
+  const remotes = Object.keys(byId).filter((e) => dom(e) === 'remote');
+  const scripts = Object.keys(byId).filter((e) => dom(e) === 'script');
+  const findScript = (re) => scripts.find((e) => re.test(objId(e)));
+  const vol = { up: findScript(/tv.*vol.*up|vol.*up/), down: findScript(/tv.*vol.*down|vol.*down/), mute: findScript(/tv.*mute|mute/) };
+  for (const id of Object.keys(entities)) {
+    if (dom(id) !== 'media_player') continue;
+    const name = (byId[id].attributes.friendly_name || '').toLowerCase();
+    const r = remotes.find((x) => objId(x) === objId(id)) || remotes.find((x) => (byId[x].attributes.friendly_name || '').toLowerCase() === name);
+    if (!r) continue;
+    entities[id].remote = r;
+    entities[r] = slim(byId[r]);
+    for (const k of ['up', 'down', 'mute']) if (vol[k]) { entities[id]['vol_' + k] = vol[k]; entities[vol[k]] = slim(byId[vol[k]]); }
+  }
+  // remote entities are controls behind a TV, never tiles of their own
+  for (const a of outAreas) a.entities = a.entities.filter((e) => dom(e) !== 'remote');
+  const otherTiles = other.filter((e) => dom(e) !== 'remote');
+
+  return { areas: outAreas, other: otherTiles, entities, allAreas: areas.map((a) => ({ id: a.id, name: a.name })), sharedAreas: cfg.sharedAreas || [],
+    channels: Array.isArray(cfg.channels) ? cfg.channels : DEFAULT_CHANNELS };
 }
 
 exports.haStates = onCall(SECRETS, async (req) => {
@@ -157,6 +186,13 @@ exports.haCall = onCall(SECRETS, async (req) => {
       data.temperature = t;
     }
     if (s === 'set_hvac_mode') data.hvac_mode = String((c.data && c.data.hvac_mode) || '').slice(0, 20);
+    if (s === 'send_command') {
+      const cmd = c.data && c.data.command;
+      const list = (Array.isArray(cmd) ? cmd : [cmd]).map(String);
+      if (!list.length || list.length > 6 || !list.every((k) => REMOTE_KEYS.has(k))) throw new HttpsError('invalid-argument', 'מקש לא מוכר');
+      data.command = list;
+      if (list.length > 1) data.delay_secs = 0.3;
+    }
     const key = d + '/' + s + '/' + JSON.stringify(data);
     (groups[key] = groups[key] || { d, s, data, ids: [] }).ids.push(e);
   }
