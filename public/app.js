@@ -35,20 +35,34 @@ const P = {
   up: 'M12 7l7 8H5z', down: 'M12 17 5 9h14z', stop: 'M7 7h10v10H7z',
   minus: 'M5 11h14v2H5z', plus: 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z',
   back: 'M10 6l-6 6 6 6 1.4-1.4L7.8 13H20v-2H7.8l3.6-3.6z',
+  awning: 'M3 3h18v4l-2 4h-2l-2-4-2 4h-2L9 7l-2 4H5L3 7zm1 10h2v8H4zm14 0h2v8h-2z',
+  speaker: 'M7 2h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm5 2.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM12 10a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 2.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z',
+  plug: 'M9 2h2v5H9zm4 0h2v5h-2zM6 7h12v4a6 6 0 0 1-5 5.9V22h-2v-5.1A6 6 0 0 1 6 11z',
+  flame: 'M12 2s6 5 6 11a6 6 0 0 1-12 0c0-3 2-5 2-5s0 3 2 4c0-5 2-10 2-10z',
+  fridge: 'M6 2h12a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm1 2v5h10V4zm0 7v9h10v-9zM8 5h2v3H8zm0 7h2v4H8z',
+  motion: 'M13 4a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM9.8 7.4 7 8.9V13H5V7.7L10.5 5c.9-.4 2-.1 2.5.8l1 2c.7 1.4 2.1 2.2 3.6 2.2H19v2h-1.4a6.3 6.3 0 0 1-4.3-1.7l-.7 3.3L15 15.2V22h-2v-5.6l-2.4-2.1L9.3 22H7.2z',
   moon: 'M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z',
 };
-const svg = (k) => `<svg viewBox="0 0 24 24"><path d="${P[k]}"/></svg>`;
+const svg = (k) => `<svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="${P[k] || P.power}"/></svg>`;
 
+// Icon by what the device does: its name says more than its HA domain
+// (a Sonoff "switch" can be a light, a script can drive the AC or the TV).
 function iconFor(e) {
   const d = dom(e.id), n = (e.name + ' ' + e.id).toLowerCase();
-  if (d === 'light') return 'bulb';
-  if (d === 'cover') return 'blind';
   if (d === 'lock') return e.state === 'unlocked' ? 'unlock' : 'lock';
-  if (d === 'climate' || /\bac\b|ac_|מזגן/.test(n)) return /heat|חימום/.test(n) ? 'sun' : 'snow';
-  if (d === 'media_player' || /\btv\b|tv_|טלוויזיה/.test(n)) return 'tv';
-  if (d === 'fan') return 'fan';
-  if (d === 'binary_sensor') return 'door';
-  if (d === 'sensor') return 'temp';
+  if (d === 'binary_sensor') return ['motion', 'occupancy'].includes(e.device_class) ? 'motion' : 'door';
+  if (d === 'sensor') return /fridge|refrigerator|מקרר|freezer|מקפיא/.test(n) ? 'fridge' : 'temp';
+  if (d === 'climate' || /\bac\b|ac_|aircon|air con|מזגן|מיזוג/.test(n)) return /heat|חימום/.test(n) ? 'sun' : 'snow';
+  if (/\btv\b|tv_|television|טלוויזיה|\byes\b|netflix|apple tv|chromecast/.test(n)) return 'tv';
+  if (/speaker|sonos|soundbar|רמקול|homepod|nest audio/.test(n)) return 'speaker';
+  if (d === 'media_player') return 'tv';
+  if (/sunshade|awning|pergola|סוכך|פרגולה|הצללה/.test(n)) return 'awning';
+  if (d === 'cover' || /shutter|blind|curtain|תריס|וילון/.test(n)) return 'blind';
+  if (d === 'fan' || /\bfan\b|מאוורר/.test(n)) return 'fan';
+  if (/boiler|water heater|דוד/.test(n)) return 'flame';
+  if (d === 'light' || /light|lamp|led|spot|אור|תאורה|מנורה|ספוט|נברשת/.test(n)) return 'bulb';
+  if (/plug|socket|outlet|שקע/.test(n)) return 'plug';
+  if (/fridge|מקרר/.test(n)) return 'fridge';
   if (d === 'script' || d === 'scene' || d === 'button') return 'play';
   return 'power';
 }
@@ -175,7 +189,7 @@ function viewMine() {
 
   if (room) {
     const canChange = me.role === 'parent';
-    h += `<div class="sec-head"><h3>${esc(areaName(room))} <span class="count">החדר שלי</span></h3>${canChange ? '<button class="link" data-pickroom>החלפת חדר</button>' : ''}</div>`;
+    h += `<div class="sec-head"><h3><span class="h-ic sm">${roomIcon(room)}</span>${esc(areaName(room))} <span class="count">החדר שלי</span></h3>${canChange ? '<button class="link" data-pickroom>החלפת חדר</button>' : ''}</div>`;
     h += sensorChips(room.entities);
     h += grid(room.entities) || `<div class="hint">אין עדיין מכשירים בחדר הזה.</div>`;
   } else {
@@ -187,7 +201,7 @@ function viewMine() {
 }
 
 function roomPicker(list, sel) {
-  return `<div class="rooms-pick">${list.map((a) => `<button data-room="${esc(a.id)}" class="${a.id === sel ? 'sel' : ''}">${esc(areaName(a))}</button>`).join('')}</div>`;
+  return `<div class="rooms-pick">${list.map((a) => `<button data-room="${esc(a.id)}" class="${a.id === sel ? 'sel' : ''}"><span class="h-ic sm">${roomIcon(a)}</span>${esc(areaName(a))}</button>`).join('')}</div>`;
 }
 
 const ROOM_IC = {
@@ -201,15 +215,29 @@ const ROOM_IC = {
   box: 'M3 7l9-5 9 5v10l-9 5-9-5zm2 1.7v7.1l6 3.4v-7.1zm14 0-6 3.4v7.1l6-3.4zM12 4.3 6.1 7.6 12 10.9l5.9-3.3z',
   table: 'M2 8h20v2h-2v10h-2v-6H6v6H4V10H2z',
   home: 'M12 3 3 10v10a1 1 0 0 0 1 1h5v-6h6v6h5a1 1 0 0 0 1-1V10z',
+  bath: 'M4 12V5a3 3 0 0 1 5.8-1.1l-1.9.7A1 1 0 0 0 6 5v7h16v2a6 6 0 0 1-3 5.2V21h-2v-1H7v1H5v-1.8A6 6 0 0 1 2 14v-2z',
+  toilet: 'M6 2h5v8h8v2a7 7 0 0 1-4 6.3V22H8v-4.3A7 7 0 0 1 4 12v-2h2z',
+  kid: 'M12 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6zM8 9h8l3 5-1.7 1L15 11.5V22h-2v-6h-2v6H9V11.5L6.7 15 5 14z',
   bolt: 'M13 2 4 14h6l-1 8 9-12h-6z',
 };
+function roomIconKey(a) {
+  const n = (a.name + ' ' + a.id + ' ' + areaName(a)).toLowerCase();
+  if (/living|סלון/.test(n)) return 'sofa';
+  if (/kitchen|מטבח/.test(n)) return 'pot';
+  if (/dining|אוכל/.test(n)) return 'table';
+  if (/restroom|toilet|wc|שירותים/.test(n)) return 'toilet';
+  if (/bath|shower|אמבט|מקלחת/.test(n)) return 'bath';
+  if (/entr|hall|כניסה|מסדרון|מבואה/.test(n)) return 'door';
+  if (/garden|yard|balcony|גינה|מרפסת|חצר/.test(n)) return 'leaf';
+  if (/gam|play|משחק/.test(n)) return 'game';
+  if (/storage|laundry|מחסן|כביסה/.test(n)) return 'box';
+  if (/master|parent|הורים/.test(n)) return 'bed';
+  if (/'s room|של /.test(n)) return 'kid';
+  if (/bed|room|חדר/.test(n)) return 'bed';
+  return 'home';
+}
 function roomIcon(a) {
-  const n = (a.name + ' ' + a.id).toLowerCase();
-  const k = /living|סלון/.test(n) ? 'sofa' : /kitchen|מטבח/.test(n) ? 'pot' : /dining|אוכל/.test(n) ? 'table'
-    : /bath|restroom|toilet|שירותים|אמבט/.test(n) ? 'drop' : /entr|hall|כניסה|מסדרון/.test(n) ? 'door'
-    : /garden|yard|גינה|מרפסת|balcony/.test(n) ? 'leaf' : /gam|משחק/.test(n) ? 'game' : /storage|מחסן/.test(n) ? 'box'
-    : /bed|room|חדר/.test(n) ? 'bed' : 'home';
-  return `<svg viewBox="0 0 24 24"><path d="${ROOM_IC[k]}"/></svg>`;
+  return `<svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="${ROOM_IC[roomIconKey(a)]}"/></svg>`;
 }
 
 function roomSummary(ids) {
@@ -271,7 +299,7 @@ function viewRooms() {
 function viewRoom(a) {
   const name = a.id === '_other' ? a.name : areaName(a);
   let h = `<div class="room-head"><button class="back" data-back aria-label="חזרה">${svg('back')}<span>הבית</span></button></div>`;
-  h += `<h2>${esc(name)}</h2>`;
+  h += `<h2 class="with-ic">${a.id === '_other' ? `<span class="h-ic"><svg viewBox="0 0 24 24"><path d="${ROOM_IC.bolt}"/></svg></span>` : `<span class="h-ic">${roomIcon(a)}</span>`}${esc(name)}</h2>`;
   h += sensorChips(a.entities);
   h += quickActions(a.entities.filter(ent), true);
   h += grid(a.entities) || `<div class="hint">אין מכשירים בחדר הזה.</div>`;

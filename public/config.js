@@ -16,7 +16,7 @@ export const OWNER_EMAILS = ['co.doron@gmail.com'];
 export const AREA_NAMES = {
   'Living Room': 'סלון',
   'Kitchen': 'מטבח',
-  'Master Bedroom': 'חדר השינה שלנו',
+  'Master Bedroom': 'חדר שינה הורים',
   "Adi's room": 'החדר של עדי',
   "Aviv's room": 'החדר של אביב',
   "Matan's room": 'החדר של מתן',
