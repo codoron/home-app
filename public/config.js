@@ -1,6 +1,7 @@
 export const firebaseConfig = {
   apiKey: "AIzaSyAXouXyBkc1p_SbyHCUc6hhqSAazofVED0",
-  authDomain: "home-app-f94e4.firebaseapp.com",
+  // Same-origin auth handler: sign-in works in Safari / in-app browsers (WhatsApp) with storage partitioning.
+  authDomain: /\.(web\.app|firebaseapp\.com)$/.test(location.hostname) ? location.host : "home-app-f94e4.firebaseapp.com",
   projectId: "home-app-f94e4",
   storageBucket: "home-app-f94e4.firebasestorage.app",
   messagingSenderId: "946405829381",

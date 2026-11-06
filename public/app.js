@@ -453,7 +453,10 @@ function show(id) { for (const s of ['login', 'denied', 'main', 'loading']) $('#
 let toastTimer;
 function toast(msg) { const el = $('#toast'); el.textContent = msg; el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 2600); }
 
-getRedirectResult(auth).catch(() => {});
+getRedirectResult(auth).catch((e) => {
+  $('#loginErr').textContent = 'הכניסה לא הושלמה. אם פתחתם את הקישור מתוך וואטסאפ, פתחו אותו ב־Safari או ב־Chrome ונסו שוב.';
+  $('#loginErr').hidden = false;
+});
 onAuthStateChanged(auth, (u) => {
   S.user = u; S.data = null;
   if (S.unsubMembers) { S.unsubMembers(); S.unsubMembers = null; }
