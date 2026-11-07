@@ -298,13 +298,19 @@ function viewRooms() {
   if (S.data.other.length) {
     cards.push(['_other', `<button class="room-card" data-key="_other" data-open="_other">
       <div class="rc-top"><span class="rc-ic"><svg viewBox="0 0 24 24"><path d="${ROOM_IC.bolt}"/></svg></span></div>
-      <div class="rc-name">פעולות נוספות</div><div class="rc-sum">מזגן, טלוויזיה ועוד</div><div class="rc-n">רק להורים</div></button>`]);
+      <div class="rc-name">פעולות נוספות</div><div class="rc-sum">${esc(otherSummary())}</div><div class="rc-n">בלי חדר ב־HA · ${S.data.other.length} פריטים</div></button>`]);
   }
   h += `<div class="room-grid ${S.edit ? 'editing' : ''}" data-sort="rooms">${ordered(cards, layoutOf('rooms'), (c) => c[0]).map((c) => c[1]).join('')}</div>`;
   const empty = S.data.areas.filter((a) => !a.entities.length).map(areaName);
   if (empty.length) h += `<p class="hint">חדרים בלי מכשירים: ${esc(empty.join(', '))}. משייכים מכשיר לחדר ב־Home Assistant (גלגל השיניים של המכשיר ← Area).</p>`;
   if (isTablet()) h += `<p class="tablet-foot">טאבלט משותף · לחיצה על ☆ במכשיר בתוך חדר מוסיפה אותו למועדפים · <button class="link" data-signout>התנתקות</button></p>`;
   return h;
+}
+
+// names of the first few unassigned items, so the card says what is actually in it
+function otherSummary() {
+  const names = S.data.other.filter(ent).map((id) => ent(id).name);
+  return names.slice(0, 2).join(', ') + (names.length > 2 ? ' ועוד' : '');
 }
 
 function viewRoom(a) {
