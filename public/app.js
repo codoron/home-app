@@ -280,7 +280,8 @@ function viewRooms() {
   if (isTablet()) {
     // the tablet has no menu: shared favorites sit on the house screen itself
     const favs = myFavs().filter(favOk);
-    if (favs.length) h += `<div class="sec-head"><h3>מועדפים</h3>${favs.length > 1 ? editBtn('fav') : ''}</div>` + sortGrid('fav', favs.map((id) => tile(id)).join('')) + `<div class="sec-head"><h3>חדרים</h3>${editBtn('rooms')}</div>`;
+    if (favs.length) h += `<div class="sec-head"><h3>מועדפים</h3>${favs.length > 1 ? editBtn('fav') : ''}</div>` + sortGrid('fav', favs.map((id) => tile(id)).join(''));
+    h += `<div class="sec-head"><h3>חדרים</h3>${editBtn('rooms')}</div>`;
   }
   const cards = [];
   for (const a of areas) {
@@ -615,9 +616,21 @@ function initSortables() {
   sortables = [];
   if (!S.edit || !window.Sortable) return;
   document.querySelectorAll('[data-sort]').forEach((el) => {
+    // a grip on every card: drag from it, scroll from anywhere else
+    for (const c of el.children) {
+      if (!c.querySelector(':scope > .drag-h')) c.insertAdjacentHTML('beforeend', `<span class="drag-h" aria-label="גרירה">${svg('drag')}</span>`);
+    }
     sortables.push(new Sortable(el, {
-      animation: 160, delay: 0, touchStartThreshold: 8, forceFallback: true, fallbackOnBody: true, fallbackTolerance: 4, direction: 'vertical', ghostClass: 'drag-ghost', chosenClass: 'drag-chosen', // vertical: Sortable's horizontal mode misreads RTL rows
-      onEnd: () => saveOrder(el.dataset.sort, [...el.children].map((c) => c.dataset.key).filter(Boolean)),
+      handle: '.drag-h', animation: 200, easing: 'cubic-bezier(.2,.8,.2,1)', delay: 0,
+      forceFallback: true, fallbackOnBody: true, fallbackTolerance: 3, fallbackClass: 'drag-lift',
+      ghostClass: 'drag-ghost', chosenClass: 'drag-chosen',
+      direction: 'vertical', // Sortable's horizontal mode misreads RTL rows
+      scroll: true, scrollSensitivity: 90, scrollSpeed: 14, bubbleScroll: true,
+      onStart: () => { document.body.classList.add('dragging'); if (navigator.vibrate) navigator.vibrate(10); },
+      onEnd: (ev) => {
+        document.body.classList.remove('dragging');
+        if (ev.oldIndex !== ev.newIndex) saveOrder(el.dataset.sort, [...el.children].map((c) => c.dataset.key).filter(Boolean));
+      },
     }));
   });
 }
@@ -961,7 +974,7 @@ document.addEventListener('click', async (ev) => {
   const t = ev.target.closest('button, [data-tap], [data-group], label, [data-rclose]');
   if (!t) return;
   const ds = t.dataset;
-  if ('edit' in ds) { S.edit = !S.edit; if (S.edit) toast('גררו כרטיס כדי להזיז אותו'); render(); if (S.gsheet) { renderGroup(); initSortables(); } return; }
+  if ('edit' in ds) { S.edit = !S.edit; if (S.edit) toast('גררו את הכרטיסים בעזרת הידית ⠿'); render(); if (S.gsheet) { renderGroup(); initSortables(); } return; }
   if (ds.editreset) return resetOrder(ds.editreset);
   if (S.edit && t.closest('[data-sort]')) return;
   if (ds.fav) { ev.stopPropagation(); return toggleFav(ds.fav); }
