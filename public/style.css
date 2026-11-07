@@ -327,3 +327,19 @@ body.tablet #toast { bottom: 24px; }
   .sheet .g-sheet { width: min(720px, 94vw); }
   .g-big { min-height: 96px; font-size: 18px; }
 }
+
+/* Arranging */
+.edit-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--card); color: var(--muted);
+  border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: 500; cursor: pointer; flex: none; }
+.edit-btn svg { width: 16px; height: 16px; fill: currentColor; }
+.edit-btn.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.edit-row2 { display: inline-flex; align-items: center; gap: 12px; flex: none; }
+.sec-head h2 { margin-bottom: 4px; }
+.g-edit { margin-top: 12px; }
+.editing > * { cursor: grab; touch-action: none; animation: wiggle .32s ease-in-out infinite alternate; }
+.editing > *:nth-child(2n) { animation-delay: .16s; }
+.editing .fav, .editing .ctl { pointer-events: none; }
+.drag-ghost { opacity: .35; }
+.drag-chosen { animation: none !important; box-shadow: 0 10px 28px rgba(0, 0, 0, .18); }
+@keyframes wiggle { from { transform: rotate(-.6deg); } to { transform: rotate(.6deg); } }
+@media (prefers-reduced-motion: reduce) { .editing > * { animation: none; outline: 1px dashed var(--muted); } }

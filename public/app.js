@@ -44,6 +44,7 @@ const P = {
   right: 'M9 5l8 7-8 7z', left: 'M15 5 7 12l8 7z',
   mute: 'M3 9h4l5-4v14l-5-4H3zm13.6 0L15 10.6 16.4 12 15 13.4 16.6 15l1.4-1.4 1.4 1.4 1.6-1.6-1.4-1.4L21 10.6 19.4 9 18 10.4z',
   home: 'M12 3 3 10v10a1 1 0 0 0 1 1h5v-6h6v6h5a1 1 0 0 0 1-1V10z',
+  drag: 'M7 4h3v3H7zm7 0h3v3h-3zM7 10.5h3v3H7zm7 0h3v3h-3zM7 17h3v3H7zm7 0h3v3h-3z',
   moon: 'M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z',
 };
 const svg = (k) => `<svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="${P[k] || P.power}"/></svg>`;
@@ -131,11 +132,11 @@ function tile(id, opts = {}) {
     if (f & 1) b.push(`<button data-act="${esc(id)}" data-s="open_cover" aria-label="פתיחה">${svg('up')}</button>`);
     if (f & 8) b.push(`<button data-act="${esc(id)}" data-s="stop_cover" aria-label="עצירה">${svg('stop')}</button>`);
     if (f & 2) b.push(`<button data-act="${esc(id)}" data-s="close_cover" aria-label="סגירה">${svg('down')}</button>`);
-    return `<div class="${cls.join(' ')}">${star}${head}${label}<div class="ctl">${b.join('')}</div></div>`;
+    return `<div class="${cls.join(' ')}" data-key="${esc(id)}">${star}${head}${label}<div class="ctl">${b.join('')}</div></div>`;
   }
   if (d === 'climate') {
     const t = e.temperature ?? '–';
-    return `<div class="${cls.join(' ')}">${star}${head}${label}
+    return `<div class="${cls.join(' ')}" data-key="${esc(id)}">${star}${head}${label}
       <div class="ctl">
         <button data-temp="${esc(id)}" data-delta="-1" aria-label="פחות">${svg('minus')}</button>
         <div class="temp">${esc(t)}°</div>
@@ -144,7 +145,7 @@ function tile(id, opts = {}) {
       </div></div>`;
   }
   if (SENSOR.includes(d)) return '';
-  return `<div class="${cls.join(' ')}" data-tap="${esc(id)}" role="button" tabindex="0">${star}${head}${label}</div>`;
+  return `<div class="${cls.join(' ')}" data-key="${esc(id)}" data-tap="${esc(id)}" role="button" tabindex="0">${star}${head}${label}</div>`;
 }
 
 function sensorChips(ids) {
@@ -185,15 +186,15 @@ function viewMine() {
   if (isTablet()) {
     const favs = myFavs().filter(favOk);
     return `<h2>המועדפים של הבית</h2>` + quickActions(allControllable()) +
-      (favs.length ? grid(favs) : `<div class="hint" style="margin-top:14px">אין עדיין מועדפים. לחצו על ☆ בפינה של מכשיר בכל חדר כדי להוסיף אותו לכאן.</div>`);
+      (favs.length ? sortGrid('fav', favs.map((id) => tile(id)).join('')) : `<div class="hint" style="margin-top:14px">אין עדיין מועדפים. לחצו על ☆ בפינה של מכשיר בכל חדר כדי להוסיף אותו לכאן.</div>`);
   }
   const room = S.data.areas.find((a) => a.id === me.room) || null;
   const favs = myFavs().filter(favOk);
   let h = `<h2>שלום, ${esc(me.name.split(' ')[0])}</h2>`;
   h += quickActions(allControllable());
 
-  h += `<h3>המועדפים שלי</h3>`;
-  h += favs.length ? grid(favs) : `<div class="hint">אין עדיין מועדפים. לחצו על ☆ בפינה של כל מכשיר כדי להוסיף אותו לכאן.</div>`;
+  h += `<div class="sec-head"><h3>המועדפים שלי</h3>${favs.length > 1 ? editBtn('fav') : ''}</div>`;
+  h += favs.length ? sortGrid('fav', favs.map((id) => tile(id)).join('')) : `<div class="hint">אין עדיין מועדפים. לחצו על ☆ בפינה של כל מכשיר כדי להוסיף אותו לכאן.</div>`;
 
   if (room) {
     const canChange = me.role === 'parent';
@@ -273,32 +274,32 @@ function viewRooms() {
   if (room) return viewRoom(room);
   S.room = null;
   const mine = S.data.me.room;
-  const areas = S.data.areas.filter((a) => a.entities.length).sort((a, b) => (b.id === mine) - (a.id === mine));
-  let h = isTablet() ? homeStatus() : `<h2>הבית</h2>`;
+  const areas = ordered(S.data.areas.filter((a) => a.entities.length).sort((a, b) => (b.id === mine) - (a.id === mine)), layoutOf('rooms'), (a) => a.id);
+  let h = isTablet() ? homeStatus() : `<div class="sec-head"><h2>הבית</h2>${editBtn('rooms')}</div>`;
   h += quickActions(allControllable());
   if (isTablet()) {
     // the tablet has no menu: shared favorites sit on the house screen itself
     const favs = myFavs().filter(favOk);
-    if (favs.length) h += `<h3>מועדפים</h3>` + grid(favs) + `<h3>חדרים</h3>`;
+    if (favs.length) h += `<div class="sec-head"><h3>מועדפים</h3>${favs.length > 1 ? editBtn('fav') : ''}</div>` + sortGrid('fav', favs.map((id) => tile(id)).join('')) + `<div class="sec-head"><h3>חדרים</h3>${editBtn('rooms')}</div>`;
   }
-  h += `<div class="room-grid">`;
+  const cards = [];
   for (const a of areas) {
     const sum = roomSummary(a.entities);
     const gr = groupRoom(a.id, a.entities);
     const n = gr.groups.length + gr.tiles.length;
-    h += `<button class="room-card ${sum.on ? 'on' : ''} ${sum.alert ? 'alert' : ''}" data-open="${esc(a.id)}">
+    cards.push([a.id, `<button class="room-card ${sum.on ? 'on' : ''} ${sum.alert ? 'alert' : ''}" data-key="${esc(a.id)}" data-open="${esc(a.id)}">
       <div class="rc-top"><span class="rc-ic">${roomIcon(a)}</span>${sum.temp ? `<span class="rc-temp">${esc(sum.temp)}</span>` : ''}${a.id === mine ? '<span class="rc-mine">שלי</span>' : ''}</div>
       <div class="rc-name">${esc(areaName(a))}</div>
       <div class="rc-sum">${esc(sum.text)}</div>
       <div class="rc-n">${n === 1 ? 'פריט אחד' : n + ' פריטים'}</div>
-    </button>`;
+    </button>`]);
   }
   if (S.data.other.length) {
-    h += `<button class="room-card" data-open="_other">
+    cards.push(['_other', `<button class="room-card" data-key="_other" data-open="_other">
       <div class="rc-top"><span class="rc-ic"><svg viewBox="0 0 24 24"><path d="${ROOM_IC.bolt}"/></svg></span></div>
-      <div class="rc-name">פעולות נוספות</div><div class="rc-sum">מזגן, טלוויזיה ועוד</div><div class="rc-n">רק להורים</div></button>`;
+      <div class="rc-name">פעולות נוספות</div><div class="rc-sum">מזגן, טלוויזיה ועוד</div><div class="rc-n">רק להורים</div></button>`]);
   }
-  h += `</div>`;
+  h += `<div class="room-grid ${S.edit ? 'editing' : ''}" data-sort="rooms">${ordered(cards, layoutOf('rooms'), (c) => c[0]).map((c) => c[1]).join('')}</div>`;
   const empty = S.data.areas.filter((a) => !a.entities.length).map(areaName);
   if (empty.length) h += `<p class="hint">חדרים בלי מכשירים: ${esc(empty.join(', '))}. משייכים מכשיר לחדר ב־Home Assistant (גלגל השיניים של המכשיר ← Area).</p>`;
   if (isTablet()) h += `<p class="tablet-foot">טאבלט משותף · לחיצה על ☆ במכשיר בתוך חדר מוסיפה אותו למועדפים · <button class="link" data-signout>התנתקות</button></p>`;
@@ -308,7 +309,7 @@ function viewRooms() {
 function viewRoom(a) {
   const name = a.id === '_other' ? a.name : areaName(a);
   let h = `<div class="room-head"><button class="back" data-back aria-label="חזרה">${svg('back')}<span>הבית</span></button></div>`;
-  h += `<h2 class="with-ic">${a.id === '_other' ? `<span class="h-ic"><svg viewBox="0 0 24 24"><path d="${ROOM_IC.bolt}"/></svg></span>` : `<span class="h-ic">${roomIcon(a)}</span>`}${esc(name)}</h2>`;
+  h += `<div class="sec-head"><h2 class="with-ic">${a.id === '_other' ? `<span class="h-ic"><svg viewBox="0 0 24 24"><path d="${ROOM_IC.bolt}"/></svg></span>` : `<span class="h-ic">${roomIcon(a)}</span>`}${esc(name)}</h2>${editBtn('r:' + a.id)}</div>`;
   h += sensorChips(a.entities);
   h += quickActions(a.entities.filter(ent), true);
   h += roomGrid(a.id, a.entities) || `<div class="hint">אין מכשירים בחדר הזה.</div>`;
@@ -316,6 +317,7 @@ function viewRoom(a) {
 }
 
 function openRoom(id) {
+  S.edit = false;
   S.room = id;
   history.pushState({ room: id }, '');
   render(); window.scrollTo(0, 0);
@@ -325,6 +327,7 @@ window.addEventListener('popstate', () => {
   if (S.skipPop) { S.skipPop = false; return; }
   if (S.remote) { closeRemote(false); return; }
   if (S.gsheet) { closeGroup(false); return; }
+  S.edit = false;
   if (S.room) { S.room = null; render(); window.scrollTo(0, 0); }
 });
 
@@ -380,6 +383,8 @@ function render() {
   document.body.classList.toggle('tablet', isTablet());
   if (S.remote && !R.edit && !R.num) renderRemote();
   if (S.gsheet) renderGroup();
+  document.body.classList.toggle('arranging', !!S.edit);
+  initSortables();
   const mineLabel = document.querySelector('[data-tab="mine"] span');
   if (mineLabel) mineLabel.textContent = isTablet() ? 'מועדפים' : 'שלי';
   if (isTablet()) { tickClock(); keepAwake(); }
@@ -493,7 +498,7 @@ function groupTile(g) {
     const avail = g.lights.filter((id) => !isNA(ent(id)));
     const on = avail.filter((id) => isOn(ent(id))).length;
     const st = !g.lights.length ? `${g.runs.length + (g.allOn ? 1 : 0) + (g.allOff ? 1 : 0)} פעולות` : on ? `${on} מתוך ${avail.length} דולקים` : 'הכול כבוי';
-    return `<div class="tile group ${on ? 'on' : ''}" data-group="${esc(g.id)}" role="button" tabindex="0">${star}
+    return `<div class="tile group ${on ? 'on' : ''}" data-key="${esc(g.id)}" data-group="${esc(g.id)}" role="button" tabindex="0">${star}
       <div class="ic">${svg('bulb')}</div><div><div class="nm">תאורה</div><div class="st">${esc(st)}</div>${where}</div>
       <div class="g-more">${g.lights.length + g.runs.length} מפסקים ›</div></div>`;
   }
@@ -502,7 +507,7 @@ function groupTile(g) {
     const mode = last ? MODE(g, ent(last.id).name) : null;
     const st = last ? `${mode.label} · ${ago(last.r.at)}` : 'לחצו לבחירת מצב';
     const icon = g.kind === 'fan' ? 'fan' : mode && mode.heat ? 'sun' : 'snow';
-    return `<div class="tile group cool ${mode && !mode.off ? (mode.heat ? 'heat' : 'chill') : ''}" data-group="${esc(g.id)}" role="button" tabindex="0">${star}
+    return `<div class="tile group cool ${mode && !mode.off ? (mode.heat ? 'heat' : 'chill') : ''}" data-key="${esc(g.id)}" data-group="${esc(g.id)}" role="button" tabindex="0">${star}
       <div class="ic">${svg(icon)}</div><div><div class="nm">${g.kind === 'fan' ? 'מאוורר' : 'מזגן'}</div><div class="st">${esc(st)}</div>${where}</div>
       <div class="g-more">${g.items.length} מצבים ›</div></div>`;
   }
@@ -513,8 +518,8 @@ let opts_where = false;
 // Room content: group cards first, then the rest, then a folded list of unavailable devices.
 function roomGrid(roomId, ids) {
   const g = groupRoom(roomId, ids);
-  const cards = g.groups.map(groupTile).join('') + g.tiles.map((id) => tile(id)).join('');
-  let h = cards ? `<div class="grid">${cards}</div>` : '';
+  const items = ordered([...g.groups.map((x) => [x.id, groupTile(x)]), ...g.tiles.map((id) => [id, tile(id)])], layoutOf('r:' + roomId), (c) => c[0]);
+  let h = items.length ? sortGrid('r:' + roomId, items.map((c) => c[1]).join('')) : '';
   if (g.na.length) h += `<details class="na-list"><summary>לא זמינים (${g.na.length})</summary><div class="grid">${g.na.map((id) => tile(id)).join('')}</div></details>`;
   return h;
 }
@@ -526,6 +531,7 @@ function openGroup(gid) {
   let el = document.getElementById('gsheet');
   if (!el) { el = document.createElement('div'); el.id = 'gsheet'; el.className = 'sheet'; document.body.appendChild(el); }
   renderGroup();
+  initSortables();
   requestAnimationFrame(() => el.classList.add('open'));
 }
 function closeGroup(viaHistory) {
@@ -546,7 +552,7 @@ function renderGroup() {
     const top = `<div class="g-top">
       <button class="g-big on" data-gall="on">${svg('bulb')}<span>הכול דולק</span></button>
       <button class="g-big" data-gall="off">${svg('moon')}<span>הכול כבוי</span></button></div>`;
-    body = top + `<div class="grid">${[...g.lights, ...g.runs].map((id) => tile(id)).join('')}</div>`;
+    body = top + `<div class="sec-head g-edit"><span></span>${editBtn('g:' + g.id)}</div>` + sortGrid('g:' + g.id, ordered([...g.lights, ...g.runs], layoutOf('g:' + g.id)).map((id) => tile(id)).join(''));
   } else {
     title = g.kind === 'fan' ? 'מאוורר' : 'מזגן';
     const last = acLast(g);
@@ -567,6 +573,7 @@ function renderGroup() {
     ${body}
   </div>`;
 }
+
 function groupAll(on) {
   const g = findGroup(S.gsheet);
   if (!g) return;
@@ -584,6 +591,58 @@ function runAc(id) {
     toast(`✓ ${g ? MODE(g, ent(id).name).label : ent(id).name}`);
     render();
   });
+}
+
+
+/* ---------- personal arrangement (drag & drop) ---------- */
+// layout: { rooms: [roomIds], 'r:<room>': [cardKeys], 'g:<groupId>': [switchIds] }; favorites keep their own order.
+const layoutOf = (scope) => ((S.data && S.data.me.layout) || {})[scope] || [];
+function ordered(list, saved, key = (x) => x) {
+  if (!saved || !saved.length) return list;
+  const pos = new Map(saved.map((k, i) => [k, i]));
+  const known = list.filter((x) => pos.has(key(x))).sort((a, b) => pos.get(key(a)) - pos.get(key(b)));
+  return [...known, ...list.filter((x) => !pos.has(key(x)))];   // new devices go last
+}
+const sortGrid = (scope, inner) => `<div class="grid ${S.edit ? 'editing' : ''}" data-sort="${esc(scope)}">${inner}</div>`;
+function editBtn(scope) {
+  if (!S.edit) return `<button class="edit-btn" data-edit aria-label="סידור">${svg('drag')}<span>סידור</span></button>`;
+  const reset = scope === 'fav' ? '' : `<button class="link" data-editreset="${esc(scope)}">ברירת מחדל</button>`;
+  return `<span class="edit-row2">${reset}<button class="edit-btn on" data-edit>✓ סיום</button></span>`;
+}
+let sortables = [];
+function initSortables() {
+  sortables.forEach((x) => x.destroy());
+  sortables = [];
+  if (!S.edit || !window.Sortable) return;
+  document.querySelectorAll('[data-sort]').forEach((el) => {
+    sortables.push(new Sortable(el, {
+      animation: 160, delay: 120, delayOnTouchOnly: true, forceFallback: true, fallbackOnBody: true, fallbackTolerance: 4, direction: 'vertical', // Sortable's horizontal mode misreads RTL rows ghostClass: 'drag-ghost', chosenClass: 'drag-chosen',
+      onEnd: () => saveOrder(el.dataset.sort, [...el.children].map((c) => c.dataset.key).filter(Boolean)),
+    }));
+  });
+}
+async function saveOrder(scope, keys) {
+  const me = S.data.me;
+  S.layoutAt = Date.now();
+  try {
+    if (scope === 'fav') {
+      me.favorites = [...keys, ...me.favorites.filter((f) => !keys.includes(f))];
+      await updateDoc(doc(db, 'members', me.email), { favorites: me.favorites });
+    } else {
+      me.layout = { ...(me.layout || {}), [scope]: keys };
+      await updateDoc(doc(db, 'members', me.email), { layout: me.layout });
+    }
+  } catch { toast('שמירת הסידור נכשלה'); }
+}
+async function resetOrder(scope) {
+  const me = S.data.me;
+  const l = { ...(me.layout || {}) };
+  delete l[scope];
+  me.layout = l;
+  S.layoutAt = Date.now();
+  render();
+  try { await updateDoc(doc(db, 'members', me.email), { layout: l }); toast('חזר לסידור ברירת המחדל'); }
+  catch { toast('השמירה נכשלה'); }
 }
 
 /* ---------- shared tablet (living-room panel) ---------- */
@@ -779,6 +838,7 @@ async function load() {
   loading = true;
   try {
     const r = await haStates();
+    if (S.data && Date.now() - (S.layoutAt || 0) < 15000) { r.data.me.layout = S.data.me.layout; r.data.me.favorites = S.data.me.favorites; }
     S.data = r.data; S.ok = true;
     // first screen: parents land on the house, children on their own screen
     if (!S.tab || S.data.me.role === 'tablet') S.tab = S.data.me.role === 'child' ? 'mine' : 'rooms';
@@ -786,7 +846,7 @@ async function load() {
     show('main');
     // don't redraw under someone who is typing or choosing in a form
     const a = document.activeElement;
-    if (!(a && ['INPUT', 'SELECT'].includes(a.tagName) && $('#view').contains(a))) render();
+    if (!S.edit && !(a && ['INPUT', 'SELECT'].includes(a.tagName) && $('#view').contains(a))) render();
   } catch (e) {
     if (/not-member/.test(e.message || '')) {
       $('#deniedEmail').textContent = S.user.email; show('denied');
@@ -901,6 +961,9 @@ document.addEventListener('click', async (ev) => {
   const t = ev.target.closest('button, [data-tap], [data-group], label, [data-rclose]');
   if (!t) return;
   const ds = t.dataset;
+  if ('edit' in ds) { S.edit = !S.edit; if (S.edit) toast('גררו כרטיס כדי להזיז אותו'); render(); if (S.gsheet) { renderGroup(); initSortables(); } return; }
+  if (ds.editreset) return resetOrder(ds.editreset);
+  if (S.edit && t.closest('[data-sort]')) return;
   if (ds.fav) { ev.stopPropagation(); return toggleFav(ds.fav); }
   if (t.closest('#remote') && !ds.tap) return remoteClick(t, ev);
   if (t.closest('#gsheet')) {
@@ -915,6 +978,7 @@ document.addEventListener('click', async (ev) => {
   if (ds.quick) return quick(ds.quick, ds.scope);
   if (ds.open) return openRoom(ds.open);
   if ('back' in ds) return history.back();
+  if (ds.tab) { S.edit = false; }
   if (ds.tab) { if (S.room && ds.tab === 'rooms') { history.back(); return; } if (S.room) { S.room = null; history.back(); } S.tab = ds.tab; render(); window.scrollTo(0, 0); return; }
   if (ds.room) return setMyRoom(ds.room);
   if ('pickroom' in ds) {

@@ -16,7 +16,7 @@ service cloud.firestore {
       allow create, delete: if isAdmin();
       allow update: if isAdmin()
         // everyone edits their own favorites; parents pick their room, a child picks it only once
-        || (signed() && email() == e && changed().hasOnly(['favorites', 'room'])
+        || (signed() && email() == e && changed().hasOnly(['favorites', 'room', 'layout'])
             && (!changed().hasAny(['room']) || resource.data.role == 'parent' || resource.data.get('room', null) == null))
         // parents can move a child to a room
         || (isParent() && resource.data.role == 'child' && changed().hasOnly(['room']));

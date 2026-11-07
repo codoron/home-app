@@ -188,7 +188,7 @@ exports.haStates = onCall(SECRETS, async (req) => {
   }
   v.runs = runs;
   return {
-    me: { email: m.email, name: m.name, role: m.role, room: m.room || null, favorites: m.favorites || [], admin: !!m.admin || SYS.includes(m.email) },
+    me: { email: m.email, name: m.name, role: m.role, room: m.room || null, favorites: m.favorites || [], layout: m.layout || {}, admin: !!m.admin || SYS.includes(m.email) },
     ...v,
   };
 });
