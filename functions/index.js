@@ -66,7 +66,7 @@ async function ha(path, opts = {}) {
 const TPL = "{% set ns = namespace(a=[]) %}{% for a in areas() %}{% set ns.a = ns.a + [{'id': a, 'name': area_name(a), 'entities': area_entities(a)}] %}{% endfor %}{{ ns.a | tojson }}";
 let areaCache = null, areaAt = 0;
 async function getAreas() {
-  if (areaCache && Date.now() - areaAt < 5 * 60 * 1000) return areaCache;
+  if (areaCache && Date.now() - areaAt < 60 * 1000) return areaCache;
   let res = await ha('/api/template', { method: 'POST', body: JSON.stringify({ template: TPL }) });
   if (typeof res === 'string') res = JSON.parse(res);
   areaCache = res; areaAt = Date.now();
