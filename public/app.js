@@ -8,8 +8,8 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const fns = getFunctions(app, 'europe-west1');
-const haStates = httpsCallable(fns, 'haStates');
-const haCall = httpsCallable(fns, 'haCall');
+const haStates = httpsCallable(fns, 'haStates', { timeout: 25000 });
+const haCall = httpsCallable(fns, 'haCall', { timeout: 30000 });
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -792,7 +792,9 @@ async function load() {
       $('#deniedEmail').textContent = S.user.email; show('denied');
     } else {
       S.ok = false;
-      if (S.data) render(); else { show('main'); $('#view').innerHTML = `<div class="hint" style="margin-top:24px">לא הצלחנו להתחבר לבית. ${esc(e.message || '')}<br><button class="btn small" data-retry style="margin-top:10px">לנסות שוב</button></div>`; }
+      const msg = /deadline|timeout/i.test((e.code || '') + e.message) ? 'הבית לא עונה כרגע. מנסים שוב אוטומטית…' : esc(e.message || '');
+      if (!S.data) setTimeout(load, 10000);
+      if (S.data) render(); else { show('main'); $('#view').innerHTML = `<div class="hint" style="margin-top:24px">לא הצלחנו להתחבר לבית. ${msg}<br><button class="btn small" data-retry style="margin-top:10px">לנסות שוב</button></div>`; }
     }
   } finally { loading = false; }
 }
