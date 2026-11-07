@@ -101,9 +101,11 @@ const isOn = (e) => TOGGLE.includes(dom(e.id)) ? e.state !== 'off' && e.state !=
 const areaName = (a) => AREA_NAMES[a.name] || a.name;
 const ent = (id) => S.data && S.data.entities[id];
 const myFavs = () => (S.data && S.data.me.favorites) || [];
+const favOk = (id) => (id.startsWith('group:') ? !!findGroup(id) : !!ent(id));
 
 /* ---------- tiles ---------- */
 function tile(id, opts = {}) {
+  if (id.startsWith('group:')) { const g = findGroup(id); if (!g) return ''; opts_where = true; const h = groupTile(g); opts_where = false; return h; }
   const e = ent(id);
   if (!e) return '';
   const d = dom(id);
@@ -179,12 +181,12 @@ function quickActions(scopeIds, inRoom) {
 function viewMine() {
   const me = S.data.me;
   if (isTablet()) {
-    const favs = myFavs().filter(ent);
+    const favs = myFavs().filter(favOk);
     return `<h2>המועדפים של הבית</h2>` + quickActions(allControllable()) +
       (favs.length ? grid(favs) : `<div class="hint" style="margin-top:14px">אין עדיין מועדפים. לחצו על ☆ בפינה של מכשיר בכל חדר כדי להוסיף אותו לכאן.</div>`);
   }
   const room = S.data.areas.find((a) => a.id === me.room) || null;
-  const favs = myFavs().filter(ent);
+  const favs = myFavs().filter(favOk);
   let h = `<h2>שלום, ${esc(me.name.split(' ')[0])}</h2>`;
   h += quickActions(allControllable());
 
@@ -195,7 +197,7 @@ function viewMine() {
     const canChange = me.role === 'parent';
     h += `<div class="sec-head"><h3><span class="h-ic sm">${roomIcon(room)}</span>${esc(areaName(room))} <span class="count">החדר שלי</span></h3>${canChange ? '<button class="link" data-pickroom>החלפת חדר</button>' : ''}</div>`;
     h += sensorChips(room.entities);
-    h += grid(room.entities) || `<div class="hint">אין עדיין מכשירים בחדר הזה.</div>`;
+    h += roomGrid(room.id, room.entities) || `<div class="hint">אין עדיין מכשירים בחדר הזה.</div>`;
   } else {
     h += `<h3>איזה חדר שלך?</h3>`;
     h += roomPicker(S.data.allAreas);
@@ -274,18 +276,19 @@ function viewRooms() {
   h += quickActions(allControllable());
   if (isTablet()) {
     // the tablet has no menu: shared favorites sit on the house screen itself
-    const favs = myFavs().filter(ent);
+    const favs = myFavs().filter(favOk);
     if (favs.length) h += `<h3>מועדפים</h3>` + grid(favs) + `<h3>חדרים</h3>`;
   }
   h += `<div class="room-grid">`;
   for (const a of areas) {
     const sum = roomSummary(a.entities);
-    const n = a.entities.filter((id) => !SENSOR.includes(dom(id))).length;
+    const gr = groupRoom(a.id, a.entities);
+    const n = gr.groups.length + gr.tiles.length;
     h += `<button class="room-card ${sum.on ? 'on' : ''} ${sum.alert ? 'alert' : ''}" data-open="${esc(a.id)}">
       <div class="rc-top"><span class="rc-ic">${roomIcon(a)}</span>${sum.temp ? `<span class="rc-temp">${esc(sum.temp)}</span>` : ''}${a.id === mine ? '<span class="rc-mine">שלי</span>' : ''}</div>
       <div class="rc-name">${esc(areaName(a))}</div>
       <div class="rc-sum">${esc(sum.text)}</div>
-      <div class="rc-n">${n === 1 ? 'מכשיר אחד' : n + ' מכשירים'}</div>
+      <div class="rc-n">${n === 1 ? 'פריט אחד' : n + ' פריטים'}</div>
     </button>`;
   }
   if (S.data.other.length) {
@@ -306,7 +309,7 @@ function viewRoom(a) {
   h += `<h2 class="with-ic">${a.id === '_other' ? `<span class="h-ic"><svg viewBox="0 0 24 24"><path d="${ROOM_IC.bolt}"/></svg></span>` : `<span class="h-ic">${roomIcon(a)}</span>`}${esc(name)}</h2>`;
   h += sensorChips(a.entities);
   h += quickActions(a.entities.filter(ent), true);
-  h += grid(a.entities) || `<div class="hint">אין מכשירים בחדר הזה.</div>`;
+  h += roomGrid(a.id, a.entities) || `<div class="hint">אין מכשירים בחדר הזה.</div>`;
   return h;
 }
 
@@ -316,7 +319,10 @@ function openRoom(id) {
   render(); window.scrollTo(0, 0);
 }
 window.addEventListener('popstate', () => {
+  // closing a sheet with × steps history back once; that step must not also leave the room
+  if (S.skipPop) { S.skipPop = false; return; }
   if (S.remote) { closeRemote(false); return; }
+  if (S.gsheet) { closeGroup(false); return; }
   if (S.room) { S.room = null; render(); window.scrollTo(0, 0); }
 });
 
@@ -371,6 +377,7 @@ function render() {
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === S.tab));
   document.body.classList.toggle('tablet', isTablet());
   if (S.remote && !R.edit && !R.num) renderRemote();
+  if (S.gsheet) renderGroup();
   const mineLabel = document.querySelector('[data-tab="mine"] span');
   if (mineLabel) mineLabel.textContent = isTablet() ? 'מועדפים' : 'שלי';
   if (isTablet()) { tickClock(); keepAwake(); }
@@ -378,6 +385,189 @@ function render() {
   $('#status').innerHTML = `<span class="dot"></span>${S.ok ? 'מחובר לבית' : 'אין חיבור לבית'}`;
 }
 
+
+
+/* ---------- device groups: one card per kind (lights, AC, TV) ---------- */
+const GID = (room, kind) => `group:${room}:${kind}`;
+const isNA = (e) => !e || e.state === 'unavailable' || e.state === 'unknown';
+const iconOf = (id) => iconFor(ent(id));
+const ALL_ON = /all.?on|הכ(ו)?ל.?דולק|הדלק.?הכ/i, ALL_OFF = /all.?off|הכ(ו)?ל.?כבוי|כבה.?הכ/i;
+
+function roomOfEntity(id) {
+  const a = S.data.areas.find((x) => x.entities.includes(id));
+  return a ? a.id : (S.data.other.includes(id) ? '_other' : null);
+}
+
+// Splits a room's entities into group cards, plain tiles and unavailable ones.
+function groupRoom(roomId, ids) {
+  ids = ids.filter(ent);
+  const used = new Set();
+  const out = { groups: [], tiles: [], na: [], hidden: new Set() };
+  // TV volume scripts already live inside the TV remote
+  for (const id of ids) {
+    const e = ent(id);
+    if (e.remote) for (const k of ['vol_up', 'vol_down', 'vol_mute']) if (e[k]) out.hidden.add(e[k]);
+  }
+  // lights: switches/lights that are lamps, plus "all on/off" style scripts
+  const lights = ids.filter((id) => TOGGLE.includes(dom(id)) && iconOf(id) === 'bulb');
+  const lightRuns = ids.filter((id) => RUN.includes(dom(id)) && iconOf(id) === 'bulb');
+  if (lights.length + lightRuns.length >= 2) {
+    const allOn = lightRuns.find((id) => ALL_ON.test(ent(id).name + ' ' + id));
+    const allOff = lightRuns.find((id) => ALL_OFF.test(ent(id).name + ' ' + id));
+    out.groups.push({ id: GID(roomId, 'lights'), kind: 'lights', room: roomId, lights, allOn, allOff,
+      runs: lightRuns.filter((id) => id !== allOn && id !== allOff) });
+    [...lights, ...lightRuns].forEach((id) => used.add(id));
+  }
+  // air conditioner: IR scripts (cool / heat / off ...)
+  const ac = ids.filter((id) => RUN.includes(dom(id)) && ['snow', 'sun'].includes(iconOf(id)));
+  if (ac.length >= 2) {
+    out.groups.push({ id: GID(roomId, 'ac'), kind: 'ac', room: roomId, items: ac });
+    ac.forEach((id) => used.add(id));
+  }
+  // TV: the player with a remote is the card; other players/TV scripts go inside its remote
+  const tvs = ids.filter((id) => dom(id) === 'media_player' && ent(id).remote);
+  if (tvs.length) {
+    const extras = ids.filter((id) => !used.has(id) && !out.hidden.has(id) && !tvs.includes(id) && !isNA(ent(id)) &&
+      (dom(id) === 'media_player' || (RUN.includes(dom(id)) && ['tv', 'speaker'].includes(iconOf(id)))));
+    S.tvExtras = S.tvExtras || {};
+    S.tvExtras[tvs[0]] = extras;
+    extras.forEach((id) => used.add(id));
+  }
+  for (const id of ids) {
+    if (used.has(id) || out.hidden.has(id) || SENSOR.includes(dom(id))) continue;
+    (isNA(ent(id)) ? out.na : out.tiles).push(id);
+  }
+  return out;
+}
+
+function findGroup(gid) {
+  const [, room, kind] = gid.split(':');
+  const r = roomById(room);
+  if (!r) return null;
+  return groupRoom(room, r.entities).groups.find((g) => g.kind === kind) || null;
+}
+
+const AC_MODE = (name) => {
+  const n = name.toLowerCase();
+  const deg = (n.match(/(\d{2})/) || [])[1];
+  const mode = /off|כיבוי|כבה/.test(n) ? 'כיבוי' : /cool|קירור|קר/.test(n) ? 'קירור' : /heat|חימום|חם/.test(n) ? 'חימום'
+    : /fan|מאוורר/.test(n) ? 'מאוורר' : /dry|ייבוש/.test(n) ? 'ייבוש' : null;
+  return { label: mode ? (mode === 'כיבוי' ? 'כיבוי' : `${mode}${deg ? ' \u2066' + deg + '°\u2069' : ''}`) : name, off: mode === 'כיבוי', heat: mode === 'חימום' };
+};
+function ago(t) {
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 1) return 'עכשיו';
+  if (m < 60) return `לפני ${m} דק׳`;
+  const h = Math.round(m / 60);
+  if (h < 24) return h === 1 ? 'לפני שעה' : `לפני ${h} שע׳`;
+  return new Date(t).toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric' });
+}
+function acLast(g) {
+  const runs = S.data.runs || {};
+  let best = null;
+  for (const id of g.items) if (runs[id] && (!best || runs[id].at > best.r.at)) best = { id, r: runs[id] };
+  return best;
+}
+
+function groupTile(g) {
+  const fav = myFavs().includes(g.id);
+  const star = `<button class="fav ${fav ? 'is' : ''}" data-fav="${esc(g.id)}" aria-label="${fav ? 'הסרה מהמועדפים' : 'הוספה למועדפים'}">${svg('star')}</button>`;
+  const roomName = g.room === '_other' ? '' : areaName(roomById(g.room));
+  const where = opts_where ? `<div class="st where">${esc(roomName)}</div>` : '';
+  if (g.kind === 'lights') {
+    const avail = g.lights.filter((id) => !isNA(ent(id)));
+    const on = avail.filter((id) => isOn(ent(id))).length;
+    const st = !g.lights.length ? `${g.runs.length + (g.allOn ? 1 : 0) + (g.allOff ? 1 : 0)} פעולות` : on ? `${on} מתוך ${avail.length} דולקים` : 'הכול כבוי';
+    return `<div class="tile group ${on ? 'on' : ''}" data-group="${esc(g.id)}" role="button" tabindex="0">${star}
+      <div class="ic">${svg('bulb')}</div><div><div class="nm">תאורה</div><div class="st">${esc(st)}</div>${where}</div>
+      <div class="g-more">${g.lights.length + g.runs.length} מפסקים ›</div></div>`;
+  }
+  if (g.kind === 'ac') {
+    const last = acLast(g);
+    const mode = last ? AC_MODE(ent(last.id).name) : null;
+    const st = last ? `${mode.label} · ${ago(last.r.at)}` : 'לחצו לבחירת מצב';
+    return `<div class="tile group cool ${mode && !mode.off ? (mode.heat ? 'heat' : 'chill') : ''}" data-group="${esc(g.id)}" role="button" tabindex="0">${star}
+      <div class="ic">${svg(mode && mode.heat ? 'sun' : 'snow')}</div><div><div class="nm">מזגן</div><div class="st">${esc(st)}</div>${where}</div>
+      <div class="g-more">${g.items.length} מצבים ›</div></div>`;
+  }
+  return '';
+}
+let opts_where = false;
+
+// Room content: group cards first, then the rest, then a folded list of unavailable devices.
+function roomGrid(roomId, ids) {
+  const g = groupRoom(roomId, ids);
+  const cards = g.groups.map(groupTile).join('') + g.tiles.map((id) => tile(id)).join('');
+  let h = cards ? `<div class="grid">${cards}</div>` : '';
+  if (g.na.length) h += `<details class="na-list"><summary>לא זמינים (${g.na.length})</summary><div class="grid">${g.na.map((id) => tile(id)).join('')}</div></details>`;
+  return h;
+}
+
+/* group sheet */
+function openGroup(gid) {
+  S.gsheet = gid;
+  history.pushState({ gsheet: gid }, '');
+  let el = document.getElementById('gsheet');
+  if (!el) { el = document.createElement('div'); el.id = 'gsheet'; el.className = 'sheet'; document.body.appendChild(el); }
+  renderGroup();
+  requestAnimationFrame(() => el.classList.add('open'));
+}
+function closeGroup(viaHistory) {
+  const el = document.getElementById('gsheet');
+  S.gsheet = null;
+  if (el) el.classList.remove('open');
+  if (viaHistory) { S.skipPop = true; history.back(); }
+}
+function renderGroup() {
+  const el = document.getElementById('gsheet');
+  if (!el || !S.gsheet) return;
+  const g = findGroup(S.gsheet);
+  if (!g) { closeGroup(true); return; }
+  const roomName = g.room === '_other' ? 'פעולות נוספות' : areaName(roomById(g.room));
+  let title, body;
+  if (g.kind === 'lights') {
+    title = 'תאורה';
+    const top = `<div class="g-top">
+      <button class="g-big on" data-gall="on">${svg('bulb')}<span>הכול דולק</span></button>
+      <button class="g-big" data-gall="off">${svg('moon')}<span>הכול כבוי</span></button></div>`;
+    body = top + `<div class="grid">${[...g.lights, ...g.runs].map((id) => tile(id)).join('')}</div>`;
+  } else {
+    title = 'מזגן';
+    const last = acLast(g);
+    body = `<div class="g-ac">${g.items.map((id) => {
+      const m = AC_MODE(ent(id).name);
+      const isLast = last && last.id === id;
+      return `<button class="g-big ${m.off ? '' : m.heat ? 'heat' : 'chill'} ${isLast ? 'last' : ''} ${S.busy.has(id) ? 'busy' : ''}" data-acrun="${esc(id)}">
+        ${svg(m.off ? 'power' : m.heat ? 'sun' : 'snow')}<span>${esc(m.label)}</span>${isLast ? `<small>${esc(ago(last.r.at))} · ${esc(last.r.by)}</small>` : ''}</button>`;
+    }).join('')}</div>
+    <p class="hello g-note">המזגן לא מדווח על המצב שלו, אז מוצגת כאן הפקודה האחרונה שנשלחה מהאפליקציה.</p>`;
+  }
+  el.innerHTML = `<div class="r-backdrop" data-rclose></div>
+  <div class="r-sheet g-sheet" role="dialog" aria-label="${esc(title)}">
+    <div class="r-head">
+      <div class="r-title"><span class="h-ic sm">${svg(g.kind === 'lights' ? 'bulb' : 'snow')}</span><div><b>${esc(title)}</b><small>${esc(roomName)}</small></div></div>
+      <button class="r-x" data-rclose aria-label="סגירה">×</button>
+    </div>
+    ${body}
+  </div>`;
+}
+function groupAll(on) {
+  const g = findGroup(S.gsheet);
+  if (!g) return;
+  const script = on ? g.allOn : g.allOff;
+  const lights = g.lights.filter((id) => !isNA(ent(id)));
+  const optimistic = () => lights.forEach((id) => { ent(id).state = on ? 'on' : 'off'; });
+  if (script) act([{ e: script, s: dom(script) === 'button' ? 'press' : 'turn_on' }], optimistic);
+  else if (lights.length) act(lights.map((e) => ({ e, s: on ? 'turn_on' : 'turn_off' })), optimistic);
+}
+function runAc(id) {
+  act([{ e: id, s: 'turn_on' }]).then((ok) => {
+    if (!ok) return;
+    S.data.runs = { ...(S.data.runs || {}), [id]: { at: Date.now(), by: S.data.me.name } };
+    toast(`✓ ${AC_MODE(ent(id).name).label}`);
+    render();
+  });
+}
 
 /* ---------- shared tablet (living-room panel) ---------- */
 const ROLE = { parent: 'הורה', child: 'ילד/ה', tablet: 'טאבלט משותף' };
@@ -416,6 +606,7 @@ for (const ev of ['pointerdown', 'keydown', 'scroll']) addEventListener(ev, () =
 setInterval(() => {
   if (!isTablet() || Date.now() - lastTouch < 60000) return;
   if (S.remote) { closeRemote(true); return; }
+  if (S.gsheet) { closeGroup(true); return; }
   if (S.room || S.tab !== 'rooms') {
     if (S.room) { S.room = null; history.back(); }
     S.tab = 'rooms'; render(); window.scrollTo(0, 0);
@@ -431,7 +622,7 @@ function openRemote(id) {
   S.remote = id; R.num = ''; R.edit = false;
   history.pushState({ remote: id }, '');
   let el = document.getElementById('remote');
-  if (!el) { el = document.createElement('div'); el.id = 'remote'; document.body.appendChild(el); }
+  if (!el) { el = document.createElement('div'); el.id = 'remote'; el.className = 'sheet'; document.body.appendChild(el); }
   renderRemote();
   requestAnimationFrame(() => el.classList.add('open'));
 }
@@ -439,7 +630,7 @@ function closeRemote(viaHistory) {
   const el = document.getElementById('remote');
   S.remote = null;
   if (el) el.classList.remove('open');
-  if (viaHistory) history.back();
+  if (viaHistory) { S.skipPop = true; history.back(); }
 }
 
 function renderRemote() {
@@ -447,6 +638,9 @@ function renderRemote() {
   if (!el || !S.remote) return;
   const e = ent(S.remote);
   if (!e) { closeRemote(true); return; }
+  const rid = roomOfEntity(S.remote);
+  if (rid) groupRoom(rid, roomById(rid).entities);
+  const extras = ((S.tvExtras || {})[S.remote] || []).filter(ent);
   const on = !['off', 'standby', 'unavailable', 'unknown'].includes(e.state);
   const k = (key, inner, cls = '', label = '') => `<button class="rk ${cls}" data-key="${key}" aria-label="${label}">${inner}</button>`;
   const vol = (ent(e.vol_down) || ent(e.vol_up))
@@ -504,6 +698,7 @@ function renderRemote() {
         </div>
       </div>
     </div>
+    ${extras.length ? `<div class="r-sec"><span>עוד בחדר</span></div><div class="grid">${extras.map((id) => tile(id, { noFav: true })).join('')}</div>` : ''}
   </div>`;
 }
 
@@ -684,11 +879,17 @@ function watchMembers() {
 
 /* ---------- events ---------- */
 document.addEventListener('click', async (ev) => {
-  const t = ev.target.closest('button, [data-tap], label, [data-rclose]');
+  const t = ev.target.closest('button, [data-tap], [data-group], label, [data-rclose]');
   if (!t) return;
   const ds = t.dataset;
   if (ds.fav) { ev.stopPropagation(); return toggleFav(ds.fav); }
-  if (t.closest('#remote')) return remoteClick(t, ev);
+  if (t.closest('#remote') && !ds.tap) return remoteClick(t, ev);
+  if (t.closest('#gsheet')) {
+    if ('rclose' in ds) return closeGroup(true);
+    if (ds.gall) return groupAll(ds.gall === 'on');
+    if (ds.acrun) return runAc(ds.acrun);
+  }
+  if (ds.group) return openGroup(ds.group);
   if (ds.tap) return toggle(ds.tap);
   if (ds.act) { const e = ent(ds.act); return act([{ e: ds.act, s: ds.s }], () => { if (ds.s === 'turn_off') e.state = 'off'; }); }
   if (ds.temp) return bumpTemp(ds.temp, Number(ds.delta));
@@ -717,6 +918,7 @@ document.addEventListener('click', async (ev) => {
 
 document.addEventListener('keydown', (ev) => {
   if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.dataset && ev.target.dataset.tap) { ev.preventDefault(); toggle(ev.target.dataset.tap); }
+  else if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.dataset && ev.target.dataset.group) { ev.preventDefault(); openGroup(ev.target.dataset.group); }
 });
 
 document.addEventListener('change', async (ev) => {

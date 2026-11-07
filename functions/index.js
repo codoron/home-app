@@ -38,6 +38,7 @@ const REMOTE_KEYS = new Set(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
   'VOLUME_UP', 'VOLUME_DOWN', 'VOLUME_MUTE', 'POWER', 'GUIDE', 'INFO']);
 const DEFAULT_CHANNELS = [{ n: '11', name: 'כאן 11' }, { n: '12', name: 'קשת 12' }, { n: '13', name: 'רשת 13' }];
 const objId = (e) => e.split('.')[1];
+const AC_RE = /(^|_|\b)(ac|aircon|air_con)(_|\b|$)|מזגן|מיזוג/i;
 const READ_ONLY = { binary_sensor: ['door', 'window', 'opening', 'garage_door', 'motion', 'occupancy'], sensor: ['temperature', 'humidity'] };
 const PARENT_ONLY = ['lock'];
 
@@ -172,7 +173,13 @@ async function view(m) {
 
 exports.haStates = onCall(SECRETS, async (req) => {
   const m = await getMember(req);
-  const v = await view(m);
+  const [v, runSnap] = await Promise.all([view(m), db.doc('config/runs').get()]);
+  const runs = {};
+  for (const [k, r] of Object.entries(runSnap.exists ? runSnap.data() : {})) {
+    const id = k.replace(/__/, '.');
+    if (v.entities[id]) runs[id] = r;
+  }
+  v.runs = runs;
   return {
     me: { email: m.email, name: m.name, role: m.role, room: m.room || null, favorites: m.favorites || [], admin: !!m.admin || SYS.includes(m.email) },
     ...v,
@@ -210,5 +217,12 @@ exports.haCall = onCall(SECRETS, async (req) => {
   for (const g of Object.values(groups)) {
     await ha(`/api/services/${g.d}/${g.s}`, { method: 'POST', body: JSON.stringify({ entity_id: g.ids, ...g.data }) });
   }
+  // IR air conditioners report no state: remember the last command sent, for everyone to see
+  const runs = {};
+  for (const c of calls) {
+    const e = String(c.e);
+    if (dom(e) === 'script' && AC_RE.test(objId(e) + ' ' + ((v.entities[e] || {}).name || ''))) runs[e.replace(/\./g, '__')] = { at: Date.now(), by: m.name || m.email };
+  }
+  if (Object.keys(runs).length) await db.doc('config/runs').set(runs, { merge: true }).catch(() => {});
   return { ok: true };
 });
