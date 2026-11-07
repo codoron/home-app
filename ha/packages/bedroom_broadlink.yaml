@@ -1,0 +1,66 @@
+# Master bedroom Broadlink (RM4 Pro, MAC a0:43:b0:08:22:a9) - IR codes from the BroadLink app scene "Master bedroom".
+# The Broadlink remote entity must be renamed to remote.bedroom_rm (Settings > Entities > the remote > gear > Entity ID).
+script:
+  bedroom_tv_power:
+    alias: "Bedroom TV power"
+    icon: mdi:television
+    sequence:
+      - action: remote.send_command
+        target:
+          entity_id: remote.bedroom_rm
+        data:
+          command: "b64:JgBmAG43Dg4OKQ4ODg4ODg4ODg4ODg4ODg4ODg4ODg4OKQ4ODg4ODg4ODg4ODg4ODg4ODg4pDg4ODg4ODg4ODg4ODg4ODg4pDg4OKQ4pDikOKQ4ODg4OKQ4ODikOKQ4pDikODg4pDgAFZA=="
+  bedroom_tv_volume_up:
+    alias: "Bedroom TV volume up"
+    icon: mdi:volume-plus
+    sequence:
+      - action: remote.send_command
+        target:
+          entity_id: remote.bedroom_rm
+        data:
+          command: "b64:JgBmAG43Dg4OKQ4ODg4ODg4ODg4ODg4ODg4ODg4ODg4OKQ4ODg4ODg4ODg4ODg4ODg4ODg4pDg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4OKQ4ODg4ODg4ODg4ODg4ODikODg4pDgAFZA=="
+  bedroom_tv_volume_down:
+    alias: "Bedroom TV volume down"
+    icon: mdi:volume-minus
+    sequence:
+      - action: remote.send_command
+        target:
+          entity_id: remote.bedroom_rm
+        data:
+          command: "b64:JgBmAG43Dg4OKQ4ODg4ODg4ODg4ODg4ODg4ODg4ODg4OKQ4ODg4ODg4ODg4ODg4ODg4ODg4pDg4ODg4ODg4ODg4ODg4ODg4pDg4ODg4ODg4OKQ4ODg4OKQ4ODg4ODg4ODikODg4pDgAFZA=="
+  bedroom_fan_off:
+    alias: "Bedroom fan off"
+    icon: mdi:fan-off
+    sequence:
+      - action: remote.send_command
+        target:
+          entity_id: remote.bedroom_rm
+        data:
+          command: "b64:JgAiASgOKQ4NKikOKQ4OKQ4pDikOKQ4pDikq6ikOKQ4OKSkOKg0OKg0qDSoNKg0qDSop6ikOKg4NKikOKQ4OKQ0qDSoOKQ4pDikp6ykOKQ4OKSkOKQ4OKQ4pDikOKg0qDSop6ikOKg0OKSkPKQ4NKg0qDSoNKg4pDikp6ykOKQ4OKSkOKQ4OKQ4pDikOKQ4pDiop6ikOKQ4OKSkOKg4NKg0qDSoNKg0qDSop6ikPKQ4NKikOKQ4OKQ0qDikOKQ4pDikp6ykOKQ4OKSkOKg0OKQ4pDioNKg0qDSop6ygOKg4NKikOKQ4NKg0qDSoNKg4pDikp6ykOKQ4OKSkOKQ4OKQ4pDikOKQ4qDSop6ikOKQ4OKSkOKg4NKg0qDSoNKg0qDSopAA0F"
+  bedroom_fan_low:
+    alias: "Bedroom fan low"
+    icon: mdi:fan-speed-1
+    sequence:
+      - action: remote.send_command
+        target:
+          entity_id: remote.bedroom_rm
+        data:
+          command: "b64:JgAEAScOKg4NKikOKQ4OKQ0qDikOKQ4mLA4OAAEHKA4pDg4pKQ4pDg4pDikOKQ4qDSopDg0AAQYpDikODikpDykODSoNKg0qDSoOKSkODgABBikOKQ4NKikOKQ4OKQ4pDikOKQ4pKQ8NAAEGKQ4pDg4pKQ4qDQ4qDSoNKg0qDSopDg4AAQUpDioODSopDikODSoNKg0qDikOKSkODgABBikOKQ4OKSkOKQ4OKQ4pDikOKQ4qKQ4NAAEGKQ4pDg4pKQ8pDg0qDSoNKg0qDSopDg4AAQUqDikODSopDikODikOKQ4pDikOKSkPDQABBikOKQ4OKSkOKg0OKQ4qDSoNKg0qKQ4OAA0F"
+
+# The fan light as a light (one-way IR, so its state is optimistic).
+template:
+  - light:
+      - name: "Bedroom fan light"
+        unique_id: bedroom_fan_light
+        turn_on:
+          - action: remote.send_command
+            target:
+              entity_id: remote.bedroom_rm
+            data:
+              command: "b64:JgCiASgOKQ4NKikOKQ4OKSkODikOKQ4pDikOAAEFKg4pDg4pKQ4qDg0pKg4NKg0qDSoNKg2YHRoJLikPKA8NKikOKQ4NKikODSoOKQ4pDikOAAEGKQ4pDg0qKQ4qDQ4pKBANKg0qDSoNKg0AAQYpDisNDSooDykODSooDw4pDSoNKg4pDgABBikOKg0NKikOKQ4OKSkODikOKQ4qDSoNAAEGKQ4pDg4pKQ4qDg0qKQ4NKg0qDSoNKg0AAQYpDykODSopDikODikpDg4pDikOKQ4pDgABBikOKQ4OKSkOKg0OKSkPDSoNKg0qDSoOAAEFKQ4qDg0qKQ4pDg0qKQ4OKQ0qDikOKQ4AAQYpDikODikpDikODikpDg4pDioNKg0qDQABBykNKQ4OKSkPKQ4NKikODSoNKg4pDSoOAAEFKg4pDg0qKQ4pDg4pKQ4OKQ4pDikOKQ4AAQYpDikODikpDioNDiooDw0qDSoNKg0qDQABBikPKQ4NKikOKQ4OKSkODikOKQ4pDikPAAEFKQ4pDg4pKQ4pDg4pKQ4OKQ4qDSoNKg0ADQU="
+        turn_off:
+          - action: remote.send_command
+            target:
+              entity_id: remote.bedroom_rm
+            data:
+              command: "b64:JgAiAScOKQ4OKSkOKQ4pDg4qDSoNKg0qKA8o6ykOKQ8NKSoOKQ4pDg0qDSoNKg4pKQ4q6ikOKQ4OKSoNKQ4oDw4pDSoOKQ4qKQ4q6SgPKg0OKikNKg4pDg0qDSoNKg0qKQ4p6ikPKQ4NKikOKA8pDg4pDSoOKQ4pKQ8o6ykOKQ4OKicPKQ4qDg0pDioNKg0qKA8p6ikOKg4NKigPKQ4pDg0qDSoOKQ4pKQ4q6ikOKQ4PKCkOKQ4pDg4pDikOKQ4qKA8p6ikOKQ4OKSgQKA8pDg0qDSoNKg0qKQ4q6SoOKg0NKikOKQ4pDg4pDSoOKQ4pKQ8p6ikOKQ4OKSkOKQ4pDw0pDioNKg0qKQ4q6SkOKg4NKigPKQ4pDg4pDSoNKg4pKQ4pAA0F"

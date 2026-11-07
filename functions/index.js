@@ -38,6 +38,7 @@ const REMOTE_KEYS = new Set(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
   'VOLUME_UP', 'VOLUME_DOWN', 'VOLUME_MUTE', 'POWER', 'GUIDE', 'INFO']);
 const DEFAULT_CHANNELS = [{ n: '11', name: 'כאן 11' }, { n: '12', name: 'קשת 12' }, { n: '13', name: 'רשת 13' }];
 const objId = (e) => e.split('.')[1];
+const FAN_RE = /(^|_|\b)fan(_|\b|$)|מאוורר/i;
 const AC_RE = /(^|_|\b)(ac|aircon|air_con)(_|\b|$)|מזגן|מיזוג/i;
 const READ_ONLY = { binary_sensor: ['door', 'window', 'opening', 'garage_door', 'motion', 'occupancy'], sensor: ['temperature', 'humidity'] };
 const PARENT_ONLY = ['lock'];
@@ -141,10 +142,16 @@ async function view(m) {
   // Whoever may use the player may use these too, even if they sit outside their rooms.
   const remotes = Object.keys(byId).filter((e) => dom(e) === 'remote');
   const scripts = Object.keys(byId).filter((e) => dom(e) === 'script');
-  const findScript = (re) => scripts.find((e) => re.test(objId(e)));
-  const vol = { up: findScript(/tv.*vol.*up|vol.*up/), down: findScript(/tv.*vol.*down|vol.*down/), mute: findScript(/tv.*mute|mute/) };
+  const VOL = { up: /vol.*up/, down: /vol.*down/, mute: /mute/ };
   const areaOf = {};
   for (const a of areas) for (const e of a.entities) areaOf[e] = a.id;
+  // volume scripts of a TV: the ones in its own room; scripts with no room only for the IR-blaster room
+  const volFor = (area, irRoom) => {
+    const pool = scripts.filter((e) => areaOf[e] === area);
+    const pick = (list) => Object.fromEntries(Object.entries(VOL).map(([k, re]) => [k, list.find((e) => re.test(objId(e)))]).filter(([, v]) => v));
+    const own = pick(pool);
+    return Object.keys(own).length || !irRoom ? own : pick(scripts.filter((e) => !areaOf[e]));
+  };
   const remoteFor = (id) => {
     const name = (byId[id].attributes.friendly_name || '').toLowerCase();
     return remotes.find((x) => objId(x) === objId(id)) || remotes.find((x) => (byId[x].attributes.friendly_name || '').toLowerCase() === name);
@@ -160,8 +167,8 @@ async function view(m) {
     if (!r) continue;
     entities[id].remote = r;
     entities[r] = slim(byId[r]);
-    if (!irAreas.has(areaOf[id])) continue;
-    for (const k of ['up', 'down', 'mute']) if (vol[k]) { entities[id]['vol_' + k] = vol[k]; entities[vol[k]] = slim(byId[vol[k]]); }
+    const vol = volFor(areaOf[id], irAreas.has(areaOf[id]));
+    for (const [k, sid] of Object.entries(vol)) { entities[id]['vol_' + k] = sid; entities[sid] = slim(byId[sid]); }
   }
   // remote entities are controls behind a TV, never tiles of their own
   for (const a of outAreas) a.entities = a.entities.filter((e) => dom(e) !== 'remote');
@@ -221,7 +228,8 @@ exports.haCall = onCall(SECRETS, async (req) => {
   const runs = {};
   for (const c of calls) {
     const e = String(c.e);
-    if (dom(e) === 'script' && AC_RE.test(objId(e) + ' ' + ((v.entities[e] || {}).name || ''))) runs[e.replace(/\./g, '__')] = { at: Date.now(), by: m.name || m.email };
+    const txt = objId(e) + ' ' + ((v.entities[e] || {}).name || '');
+    if (dom(e) === 'script' && (AC_RE.test(txt) || (FAN_RE.test(txt) && !/light|אור|תאורה|מנורה/i.test(txt)))) runs[e.replace(/\./g, '__')] = { at: Date.now(), by: m.name || m.email };
   }
   if (Object.keys(runs).length) await db.doc('config/runs').set(runs, { merge: true }).catch(() => {});
   return { ok: true };

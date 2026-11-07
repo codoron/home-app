@@ -52,6 +52,8 @@ const svg = (k) => `<svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="${P[k]
 // (a Sonoff "switch" can be a light, a script can drive the AC or the TV).
 function iconFor(e) {
   const d = dom(e.id), n = (e.name + ' ' + e.id).toLowerCase();
+  const lamp = /light|lamp|led|spot|אור|תאורה|מנורה|ספוט|נברשת/.test(n);
+  if (d === 'light' || (lamp && /\bfan\b|מאוורר/.test(n) && d !== 'fan')) return 'bulb';
   if (d === 'lock') return e.state === 'unlocked' ? 'unlock' : 'lock';
   if (d === 'binary_sensor') return ['motion', 'occupancy'].includes(e.device_class) ? 'motion' : 'door';
   if (d === 'sensor') return /fridge|refrigerator|מקרר|freezer|מקפיא/.test(n) ? 'fridge' : 'temp';
@@ -424,6 +426,11 @@ function groupRoom(roomId, ids) {
     out.groups.push({ id: GID(roomId, 'ac'), kind: 'ac', room: roomId, items: ac });
     ac.forEach((id) => used.add(id));
   }
+  const fan = ids.filter((id) => RUN.includes(dom(id)) && iconOf(id) === 'fan');
+  if (fan.length >= 2) {
+    out.groups.push({ id: GID(roomId, 'fan'), kind: 'fan', room: roomId, items: fan });
+    fan.forEach((id) => used.add(id));
+  }
   // TV: the player with a remote is the card; other players/TV scripts go inside its remote
   const tvs = ids.filter((id) => dom(id) === 'media_player' && ent(id).remote);
   if (tvs.length) {
@@ -447,6 +454,14 @@ function findGroup(gid) {
   return groupRoom(room, r.entities).groups.find((g) => g.kind === kind) || null;
 }
 
+const FAN_MODE = (name) => {
+  const n = name.toLowerCase();
+  const sp = (n.match(/speed.?(\d)|מהירות.?(\d)/) || []).slice(1).find(Boolean);
+  const label = /off|כיבוי|כבה/.test(n) ? 'כיבוי' : /low|נמוך|איטי/.test(n) ? 'נמוך' : /med|mid|בינוני/.test(n) ? 'בינוני'
+    : /high|max|גבוה|מהיר/.test(n) ? 'גבוה' : sp ? `מהירות ${sp}` : /\bon\b|הפעלה/.test(n) ? 'הפעלה' : name;
+  return { label, off: label === 'כיבוי', heat: false };
+};
+const MODE = (g, name) => (g.kind === 'fan' ? FAN_MODE(name) : AC_MODE(name));
 const AC_MODE = (name) => {
   const n = name.toLowerCase();
   const deg = (n.match(/(\d{2})/) || [])[1];
@@ -482,12 +497,13 @@ function groupTile(g) {
       <div class="ic">${svg('bulb')}</div><div><div class="nm">תאורה</div><div class="st">${esc(st)}</div>${where}</div>
       <div class="g-more">${g.lights.length + g.runs.length} מפסקים ›</div></div>`;
   }
-  if (g.kind === 'ac') {
+  if (g.kind === 'ac' || g.kind === 'fan') {
     const last = acLast(g);
-    const mode = last ? AC_MODE(ent(last.id).name) : null;
+    const mode = last ? MODE(g, ent(last.id).name) : null;
     const st = last ? `${mode.label} · ${ago(last.r.at)}` : 'לחצו לבחירת מצב';
+    const icon = g.kind === 'fan' ? 'fan' : mode && mode.heat ? 'sun' : 'snow';
     return `<div class="tile group cool ${mode && !mode.off ? (mode.heat ? 'heat' : 'chill') : ''}" data-group="${esc(g.id)}" role="button" tabindex="0">${star}
-      <div class="ic">${svg(mode && mode.heat ? 'sun' : 'snow')}</div><div><div class="nm">מזגן</div><div class="st">${esc(st)}</div>${where}</div>
+      <div class="ic">${svg(icon)}</div><div><div class="nm">${g.kind === 'fan' ? 'מאוורר' : 'מזגן'}</div><div class="st">${esc(st)}</div>${where}</div>
       <div class="g-more">${g.items.length} מצבים ›</div></div>`;
   }
   return '';
@@ -532,20 +548,20 @@ function renderGroup() {
       <button class="g-big" data-gall="off">${svg('moon')}<span>הכול כבוי</span></button></div>`;
     body = top + `<div class="grid">${[...g.lights, ...g.runs].map((id) => tile(id)).join('')}</div>`;
   } else {
-    title = 'מזגן';
+    title = g.kind === 'fan' ? 'מאוורר' : 'מזגן';
     const last = acLast(g);
     body = `<div class="g-ac">${g.items.map((id) => {
-      const m = AC_MODE(ent(id).name);
+      const m = MODE(g, ent(id).name);
       const isLast = last && last.id === id;
       return `<button class="g-big ${m.off ? '' : m.heat ? 'heat' : 'chill'} ${isLast ? 'last' : ''} ${S.busy.has(id) ? 'busy' : ''}" data-acrun="${esc(id)}">
-        ${svg(m.off ? 'power' : m.heat ? 'sun' : 'snow')}<span>${esc(m.label)}</span>${isLast ? `<small>${esc(ago(last.r.at))} · ${esc(last.r.by)}</small>` : ''}</button>`;
+        ${svg(m.off ? 'power' : g.kind === 'fan' ? 'fan' : m.heat ? 'sun' : 'snow')}<span>${esc(m.label)}</span>${isLast ? `<small>${esc(ago(last.r.at))} · ${esc(last.r.by)}</small>` : ''}</button>`;
     }).join('')}</div>
-    <p class="hello g-note">המזגן לא מדווח על המצב שלו, אז מוצגת כאן הפקודה האחרונה שנשלחה מהאפליקציה.</p>`;
+    <p class="hello g-note">${g.kind === 'fan' ? 'המאוורר' : 'המזגן'} לא מדווח על המצב שלו, אז מוצגת כאן הפקודה האחרונה שנשלחה מהאפליקציה.</p>`;
   }
   el.innerHTML = `<div class="r-backdrop" data-rclose></div>
   <div class="r-sheet g-sheet" role="dialog" aria-label="${esc(title)}">
     <div class="r-head">
-      <div class="r-title"><span class="h-ic sm">${svg(g.kind === 'lights' ? 'bulb' : 'snow')}</span><div><b>${esc(title)}</b><small>${esc(roomName)}</small></div></div>
+      <div class="r-title"><span class="h-ic sm">${svg(g.kind === 'lights' ? 'bulb' : g.kind === 'fan' ? 'fan' : 'snow')}</span><div><b>${esc(title)}</b><small>${esc(roomName)}</small></div></div>
       <button class="r-x" data-rclose aria-label="סגירה">×</button>
     </div>
     ${body}
@@ -564,7 +580,8 @@ function runAc(id) {
   act([{ e: id, s: 'turn_on' }]).then((ok) => {
     if (!ok) return;
     S.data.runs = { ...(S.data.runs || {}), [id]: { at: Date.now(), by: S.data.me.name } };
-    toast(`✓ ${AC_MODE(ent(id).name).label}`);
+    const g = S.gsheet && findGroup(S.gsheet);
+    toast(`✓ ${g ? MODE(g, ent(id).name).label : ent(id).name}`);
     render();
   });
 }
