@@ -616,7 +616,7 @@ function initSortables() {
   if (!S.edit || !window.Sortable) return;
   document.querySelectorAll('[data-sort]').forEach((el) => {
     sortables.push(new Sortable(el, {
-      animation: 160, delay: 120, delayOnTouchOnly: true, forceFallback: true, fallbackOnBody: true, fallbackTolerance: 4, direction: 'vertical', // Sortable's horizontal mode misreads RTL rows ghostClass: 'drag-ghost', chosenClass: 'drag-chosen',
+      animation: 160, delay: 0, touchStartThreshold: 8, forceFallback: true, fallbackOnBody: true, fallbackTolerance: 4, direction: 'vertical', ghostClass: 'drag-ghost', chosenClass: 'drag-chosen', // vertical: Sortable's horizontal mode misreads RTL rows
       onEnd: () => saveOrder(el.dataset.sort, [...el.children].map((c) => c.dataset.key).filter(Boolean)),
     }));
   });

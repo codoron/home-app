@@ -336,7 +336,7 @@ body.tablet #toast { bottom: 24px; }
 .edit-row2 { display: inline-flex; align-items: center; gap: 12px; flex: none; }
 .sec-head h2 { margin-bottom: 4px; }
 .g-edit { margin-top: 12px; }
-.editing > * { cursor: grab; touch-action: none; animation: wiggle .32s ease-in-out infinite alternate; }
+.editing > * { cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; animation: wiggle .32s ease-in-out infinite alternate; }
 .editing > *:nth-child(2n) { animation-delay: .16s; }
 .editing .fav, .editing .ctl { pointer-events: none; }
 .drag-ghost { opacity: .35; }
