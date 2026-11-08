@@ -98,7 +98,8 @@ module.exports = ({ ha, view, runCalls, db, dom, objId, HA_URL, HA_TOKEN }) => {
     }[d] || { turn_on: 'turn_on', turn_off: 'turn_off' };
     const s = map[a.action];
     if (!s) throw new HttpsError('invalid-argument', `הפעולה ${a.action} לא מתאימה ל־${e}`);
-    return { e, s, data: s === 'set_temperature' ? { temperature: a.temperature } : undefined };
+    // no undefined fields: the call may be stored in Firestore (pending unlock), which rejects undefined
+    return s === 'set_temperature' ? { e, s, data: { temperature: a.temperature } } : { e, s };
   }
 
   function deviceList(v, cfg) {
