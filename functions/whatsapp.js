@@ -142,11 +142,30 @@ Rules:
 - For "all lights" in a room, prefer that room's "lights all on/off" script if one exists; otherwise turn each light on/off.
 - Lights driven by RF are one-way, so their state may be stale; don't argue about it.
 - For questions about the home ("what's on?", "is the door locked?"), answer from the states below. Don't invent states.
+- To turn on a TV box and set a channel, you may just call tv_channel: it turns the box on and waits for it to boot.
+- If the user asks to turn on "the TV" and the room also has a separate TV-power script (e.g. "TV power"), run it too, because the box and the screen are separate.
 - After acting, confirm briefly what you did. If a tool returns an error, explain it simply.
 - Unlocking a door needs a confirmation; the tool will tell you. Then ask the user to reply "כן".
 
 Devices this user may use (id | name | state):
 ${deviceList(v, cfg)}`;
+  }
+
+  // A box that is off, or was just turned on, drops the first key presses: wake it and give it time to boot.
+  const BOOT_MS = 9000;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function wakeTv(m, v, tvId, woke) {
+    const tv = v.entities[tvId];
+    if (!tv || !tv.remote) return;
+    const off = ['off', 'standby', 'unavailable', 'unknown'].includes(tv.state);
+    if (off && !woke.has(tvId)) {
+      await runCalls(m, v, [{ e: tv.remote, s: 'turn_on' }]);
+      woke.set(tvId, Date.now());
+    }
+    if (woke.has(tvId)) {
+      const left = BOOT_MS - (Date.now() - woke.get(tvId));
+      if (left > 0) await sleep(left);
+    }
   }
 
   // ---- one incoming message ----
@@ -186,6 +205,7 @@ ${deviceList(v, cfg)}`;
     ];
     let reply = '';
     let pending = null;
+    const woke = new Map();   // TVs turned on during this message
     for (let round = 0; round < 4; round++) {
       const res = await ai.models.generateContent({
         model, contents,
@@ -204,12 +224,15 @@ ${deviceList(v, cfg)}`;
             pending = { calls: [call], at: Date.now() };
             response = { status: 'needs_confirmation', message: 'Not done yet. Ask the user to reply "כן" to unlock.' };
           } else {
+            if (fc.name === 'tv_channel') await wakeTv(m, v, fc.args.tv_entity_id, woke);
             await runCalls(m, v, [call]);
+            if (call.s === 'turn_on' && v.entities[call.e]?.remote) woke.set(call.e, Date.now());
             response = { status: 'done' };
           }
         } catch (e) {
           response = { status: 'error', message: e.message };
         }
+        console.log('whatsapp tool', fc.name, JSON.stringify(fc.args), response.status, response.message || '');
         parts.push({ functionResponse: { name: fc.name, response } });
       }
       contents.push({ role: 'user', parts });
