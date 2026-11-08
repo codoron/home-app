@@ -1,0 +1,31 @@
+# Living room shutter (תריס) - 433MHz RF codes from the BroadLink app scenes "Open/Close Living Room Shutter".
+# Sent by the living room Broadlink (BroadLink gateway MAC a0:43:b0:32:c4:e8 = remote.rm4plus).
+# The BroadLink scenes send Up/Down and then Stop after 16 seconds.
+script:
+  living_shutter_up:
+    alias: "Living room shutter up"
+    icon: mdi:arrow-up
+    sequence:
+      - action: remote.send_command
+        target:
+          entity_id: remote.rm4plus
+        data:
+          command: "b64:si4yAB0LHBwMCxwcCwscCxwLHB0LHAwLHAwcCx0cCxwMHAsLHBwMHAscDAscCxwcCx0LHAzGAAAAAAAA"
+  living_shutter_down:
+    alias: "Living room shutter down"
+    icon: mdi:arrow-down
+    sequence:
+      - action: remote.send_command
+        target:
+          entity_id: remote.rm4plus
+        data:
+          command: "b64:sjIyABwMHB0LDBwdCwwcDBwLHB0LHQsMHAwcDBwdCx0LHAsMHBwLHQsdCwwcHQsMHB0LHQvHAAAAAAAA"
+  living_shutter_stop:
+    alias: "Living room shutter stop"
+    icon: mdi:stop
+    sequence:
+      - action: remote.send_command
+        target:
+          entity_id: remote.rm4plus
+        data:
+          command: "b64:sioyABwLHBwLCx0cDAsdCxwLHRwMHAwLHQscCxwcDBwMHAwLHRwMHAscCwscHQscDBwMHAzGAAAAAAAA"
