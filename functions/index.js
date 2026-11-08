@@ -142,7 +142,8 @@ async function view(m) {
   // Whoever may use the player may use these too, even if they sit outside their rooms.
   const remotes = Object.keys(byId).filter((e) => dom(e) === 'remote');
   const scripts = Object.keys(byId).filter((e) => dom(e) === 'script');
-  const VOL = { up: /vol.*up/, down: /vol.*down/, mute: /mute/ };
+  // IR scripts that belong to a TV in the same room: volume, mute, and the screen's own power (the box has its own)
+  const VOL = { up: /vol.*up/, down: /vol.*down/, mute: /mute/, power: /tv.*power|screen.*power/ };
   const areaOf = {};
   for (const a of areas) for (const e of a.entities) areaOf[e] = a.id;
   // volume scripts of a TV: the ones in its own room; scripts with no room only for the IR-blaster room

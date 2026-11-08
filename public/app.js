@@ -422,7 +422,7 @@ function groupRoom(roomId, ids) {
   // TV volume scripts already live inside the TV remote
   for (const id of ids) {
     const e = ent(id);
-    if (e.remote) for (const k of ['vol_up', 'vol_down', 'vol_mute']) if (e[k]) out.hidden.add(e[k]);
+    if (e.remote) for (const k of ['vol_up', 'vol_down', 'vol_mute', 'vol_power']) if (e[k]) out.hidden.add(e[k]);
   }
   // lights: switches/lights that are lamps, plus "all on/off" style scripts
   const lights = ids.filter((id) => TOGGLE.includes(dom(id)) && iconOf(id) === 'bulb');
@@ -760,7 +760,8 @@ function renderRemote() {
   <div class="r-sheet" role="dialog" aria-label="שלט">
     <div class="r-head">
       <div class="r-title"><span class="h-ic sm">${svg('tv')}</span><div><b>${esc(e.name)}</b><small>${on ? 'דולק' : 'כבוי'}</small></div></div>
-      <button class="rk power ${on ? 'on' : ''}" data-power aria-label="הפעלה וכיבוי">${svg('power')}</button>
+      ${e.vol_power ? `<button class="rk screen" data-vol="${esc(e.vol_power)}" aria-label="הפעלה וכיבוי של המסך">${svg('tv')}<span>מסך</span></button>` : ''}
+      <button class="rk power ${on ? 'on' : ''}" data-power aria-label="הפעלה וכיבוי של הממיר">${svg('power')}</button>
       <button class="r-x" data-rclose aria-label="סגירה">×</button>
     </div>
     <div class="r-body">

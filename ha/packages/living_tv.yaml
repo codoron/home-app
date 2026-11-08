@@ -1,0 +1,21 @@
+# Living room TV screen (IR via RM4Plus, MAC a0:43:b0:32:c4:e8) - codes from the BroadLink app scene "Living room TV".
+# The Yes box is controlled separately (Android TV Remote); this is the TV set itself.
+script:
+  living_tv_power:
+    alias: "Living room TV power"
+    icon: mdi:television
+    sequence:
+      - action: remote.send_command
+        target:
+          entity_id: remote.rm4plus
+        data:
+          command: "b64:JgBIAAABJpMTEhMSEzcUEhMSExITEhQRFDcTNxMSEzcUNxM3EzcUNxMSExITEhQ2FBITEhMSExIUNhQ3EzcTEhQ3EzcTNxQ3EwANBQ=="
+  living_tv_mute:
+    alias: "Living room TV mute"
+    icon: mdi:volume-mute
+    sequence:
+      - action: remote.send_command
+        target:
+          entity_id: remote.rm4plus
+        data:
+          command: "b64:JgBmAG43Dg4OKQ4ODg4ODg4ODg4ODg4ODg4ODg4ODg4OKQ4ODg4ODg4ODg4ODg4ODg4ODg4pDg4ODg4ODg4ODg4ODg4ODg4ODikODg4ODikOKQ4ODg4ODg4pDg4ODg4pDikODg4pDgAFZA=="

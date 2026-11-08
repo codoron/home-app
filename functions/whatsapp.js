@@ -111,7 +111,7 @@ module.exports = ({ ha, view, runCalls, db, dom, objId, HA_URL, HA_TOKEN }) => {
     };
     const skip = new Set();
     // remotes and TV volume scripts belong to their TV, not to the plain list
-    for (const e of Object.values(v.entities)) if (e.remote) for (const k of ['remote', 'vol_up', 'vol_down', 'vol_mute']) if (e[k]) skip.add(e[k]);
+    for (const e of Object.values(v.entities)) if (e.remote) for (const k of ['remote', 'vol_up', 'vol_down', 'vol_mute', 'vol_power']) if (e[k]) skip.add(e[k]);
     const out = [];
     for (const a of v.areas) {
       const ids = a.entities.filter((id) => v.entities[id] && !skip.has(id));
@@ -124,6 +124,7 @@ module.exports = ({ ha, view, runCalls, db, dom, objId, HA_URL, HA_TOKEN }) => {
       if (!e.remote) continue;
       const vol = ['vol_up', 'vol_down', 'vol_mute'].filter((k) => e[k]).map((k) => `${k.slice(4)}=${e[k]}`);
       if (vol.length) out.push(`(volume of ${e.name}: run scripts ${vol.join(', ')})`);
+      if (e.vol_power) out.push(`(the TV screen of ${e.name} has its own power toggle: script ${e.vol_power})`);
     }
     const ch = (Array.isArray(cfg.channels) ? cfg.channels : []).map((c) => `${c.name}=${c.n}`).join(', ');
     if (ch) out.push(`Saved TV channels: ${ch}`);
@@ -143,7 +144,7 @@ Rules:
 - Lights driven by RF are one-way, so their state may be stale; don't argue about it.
 - For questions about the home ("what's on?", "is the door locked?"), answer from the states below. Don't invent states.
 - To turn on a TV box and set a channel, you may just call tv_channel: it turns the box on and waits for it to boot.
-- If the user asks to turn on "the TV" and the room also has a separate TV-power script (e.g. "TV power"), run it too, because the box and the screen are separate.
+- A TV is two devices: the box (media_player, has a real on/off state) and sometimes a screen with an IR power *toggle* script. To turn the TV on: if the box is off, run the screen power script AND turn on the box; if the box is already on, assume the screen is on too and do nothing more unless the user says the screen is dark. To turn the TV off: turn off the box and run the screen power script once. Never run the screen toggle twice.
 - After acting, confirm briefly what you did. If a tool returns an error, explain it simply.
 - Unlocking a door needs a confirmation; the tool will tell you. Then ask the user to reply "כן".
 
