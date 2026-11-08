@@ -144,8 +144,10 @@ Rules:
 - For "all lights" in a room, prefer that room's "lights all on/off" script if one exists; otherwise turn each light on/off.
 - Lights driven by RF are one-way, so their state may be stale; don't argue about it.
 - For questions about the home ("what's on?", "is the door locked?"), answer from the states below. Don't invent states.
-- To turn on a TV box and set a channel, you may just call tv_channel: it turns the box on and waits for it to boot.
-- A TV is two devices: the box (media_player, has a real on/off state) and sometimes a screen with an IR power *toggle* script. To turn the TV on: if the box is off, run the screen power script AND turn on the box; if the box is already on, assume the screen is on too and do nothing more unless the user says the screen is dark. To turn the TV off: turn off the box and run the screen power script once. Never run the screen toggle twice.
+- A TV is two devices: the box (media_player, has a real on/off state) and sometimes a screen with an IR power *toggle* script.
+- To turn a TV on and/or set a channel, just call tv_channel (or control turn_on on the box): if the box was off, the system turns on the box AND the screen itself and waits for boot. Don't call the screen script yourself for this.
+- If the box was already on (the tool note says so), the screen is assumed on. Mention briefly that if the screen is dark they can say "תדליק את המסך".
+- Run the screen power script only when the user explicitly talks about the screen being dark/off, or to turn the TV off (turn off the box and run the screen script once). Never toggle the screen twice.
 - After acting, confirm briefly what you did. If a tool returns an error, explain it simply.
 - Unlocking a door needs a confirmation; the tool will tell you. Then ask the user to reply "כן".
 
@@ -160,14 +162,22 @@ ${deviceList(v, cfg)}`;
     const tv = v.entities[tvId];
     if (!tv || !tv.remote) return;
     const off = ['off', 'standby', 'unavailable', 'unknown'].includes(tv.state);
+    let note = 'box was already on (screen assumed on)';
     if (off && !woke.has(tvId)) {
       await runCalls(m, v, [{ e: tv.remote, s: 'turn_on' }]);
       woke.set(tvId, Date.now());
+      note = 'box was off: turned the box on';
+      // the screen is a separate IR toggle; the box being off means the screen is most likely off too
+      if (tv.vol_power && !woke.has(tv.vol_power)) {
+        try { await runCalls(m, v, [{ e: tv.vol_power, s: 'turn_on' }]); woke.set(tv.vol_power, Date.now()); note += ' and toggled the screen on'; }
+        catch (e) { console.error('whatsapp screen power', e.message); }
+      }
     }
     if (woke.has(tvId)) {
       const left = BOOT_MS - (Date.now() - woke.get(tvId));
       if (left > 0) await sleep(left);
     }
+    return note;
   }
 
   // ---- voice notes ----
@@ -262,10 +272,23 @@ ${deviceList(v, cfg)}`;
             pending = { calls: [call], at: Date.now() };
             response = { status: 'needs_confirmation', message: 'Not done yet. Ask the user to reply "כן" to unlock.' };
           } else {
-            if (fc.name === 'tv_channel') await wakeTv(m, v, fc.args.tv_entity_id, woke);
-            await runCalls(m, v, [call]);
-            if (call.s === 'turn_on' && v.entities[call.e]?.remote) woke.set(call.e, Date.now());
-            response = { status: 'done' };
+            let note;
+            if (fc.name === 'tv_channel') note = await wakeTv(m, v, fc.args.tv_entity_id, woke);
+            const tv = Object.values(v.entities).find((x) => x.remote && x.vol_power === call.e);
+            if (tv && woke.has(call.e)) note = 'screen was already toggled in this message; not toggled again';
+            else {
+              // "turn on the TV" on a box that is off: wake the screen with it, unless it was just done
+              const box = v.entities[call.e];
+              const boxOff = box?.remote && call.s === 'turn_on' && ['off', 'standby', 'unavailable', 'unknown'].includes(box.state);
+              await runCalls(m, v, [call]);
+              if (tv) woke.set(call.e, Date.now());
+              if (call.s === 'turn_on' && box?.remote) woke.set(call.e, Date.now());
+              if (boxOff && box.vol_power && !woke.has(box.vol_power)) {
+                await runCalls(m, v, [{ e: box.vol_power, s: 'turn_on' }]); woke.set(box.vol_power, Date.now());
+                note = 'turned the box on and toggled the screen on';
+              }
+            }
+            response = note ? { status: 'done', note } : { status: 'done' };
           }
         } catch (e) {
           response = { status: 'error', message: e.message };
