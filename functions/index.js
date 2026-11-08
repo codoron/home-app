@@ -153,11 +153,28 @@ async function view(m) {
     const own = pick(pool);
     return Object.keys(own).length || !irRoom ? own : pick(scripts.filter((e) => !areaOf[e]));
   };
-  const remoteFor = (id) => {
-    const name = (byId[id].attributes.friendly_name || '').toLowerCase();
-    return remotes.find((x) => objId(x) === objId(id)) || remotes.find((x) => (byId[x].attributes.friendly_name || '').toLowerCase() === name);
-  };
-  const tvRemotes = new Set(Object.keys(byId).filter((e) => dom(e) === 'media_player').map(remoteFor).filter(Boolean));
+  const nm = (e) => (byId[e].attributes.friendly_name || objId(e)).toLowerCase();
+  const players = Object.keys(byId).filter((e) => dom(e) === 'media_player');
+  // 1) same object id or same name
+  const link = {};
+  for (const id of players) {
+    const r = remotes.find((x) => objId(x) === objId(id)) || remotes.find((x) => nm(x) === nm(id));
+    if (r) link[id] = r;
+  }
+  // 2) a TV remote (Android TV Remote: has activities; a Broadlink blaster doesn't) left without a player,
+  //    e.g. after its own player was disabled in favour of the Cast one: give it to the best player in its room
+  const claimed = new Set(Object.values(link));
+  for (const r of remotes) {
+    const a = byId[r].attributes;
+    if (claimed.has(r) || !areaOf[r] || !('current_activity' in a || 'activity_list' in a)) continue;
+    const cands = players.filter((p) => !link[p] && areaOf[p] === areaOf[r] && !/speaker|רמקול|group|קבוצ/i.test(nm(p) + p));
+    const score = (p) => (byId[p].attributes.device_class === 'tv' ? 4 : 0) +
+      (nm(r).startsWith(nm(p)) || nm(p).startsWith(nm(r)) ? 2 : 0) + (nm(r).includes(nm(p).split(' ')[0]) ? 1 : 0);
+    const best = cands.sort((x, y) => score(y) - score(x))[0];
+    if (best) { link[best] = r; claimed.add(r); }
+  }
+  const remoteFor = (id) => link[id];
+  const tvRemotes = claimed;
   // IR blasters (Broadlink) are the remotes that belong to no TV. Their volume scripts only make sense
   // for a TV in the same room; if no blaster has a room, assume the living room.
   let irAreas = new Set(remotes.filter((r) => !tvRemotes.has(r) && areaOf[r]).map((r) => areaOf[r]));
