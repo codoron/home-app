@@ -9,7 +9,7 @@ const WA_TOKEN = defineSecret('WA_TOKEN');           // permanent (system user) 
 const WA_APP_SECRET = defineSecret('WA_APP_SECRET'); // to check Meta's signature
 const WA_VERIFY = defineSecret('WA_VERIFY');         // our own string for the webhook handshake
 
-const GRAPH = 'https://graph.facebook.com/v23.0';
+const GRAPH = 'https://graph.facebook.com/v25.0';
 const MODEL_DEFAULT = 'gemini-3.8-flash';            // Vertex AI, location "global"; override in config/app.geminiModel
 const AREA_HE = {
   'Living Room': 'סלון', Kitchen: 'מטבח', 'Master Bedroom': 'חדר שינה הורים', "Adi's room": 'החדר של עדי',

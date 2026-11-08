@@ -28,7 +28,7 @@ Family smart-home web app over Doron's Home Assistant. Separate from family-app 
 `node --check` the JS; render with Playwright, routing gstatic firebase imports to small mock modules.
 
 ## WhatsApp bot
-- `functions/whatsapp.js` → function `whatsapp` (onRequest, public): GET = Meta verify handshake (`WA_VERIFY`), POST = message, checked with `x-hub-signature-256` (`WA_APP_SECRET`). Replies via Graph v23.0 with `WA_TOKEN`.
+- `functions/whatsapp.js` → function `whatsapp` (onRequest, public): GET = Meta verify handshake (`WA_VERIFY`), POST = message, checked with `x-hub-signature-256` (`WA_APP_SECRET`). Replies via Graph v25.0 with `WA_TOKEN`.
 - Sender → member by `members/{email}.phone` (normalized `9725…`, set in the family tab); unknown numbers get no reply; tablet ignored.
 - Gemini via `@google/genai` on Vertex AI (location `global`, model `gemini-3.8-flash`, override `config/app.geminiModel`; Gemini 2.5 was retired on Vertex on 2026-10-20). Tools: `control`, `tv_channel`; every call goes through `runCalls` (same checks as haCall). Prompt lists only that member's devices.
 - Unlock needs "כן" within 3 min (`wa_chats/{phone}.pending`). Short history (6 turns, 10 min) in `wa_chats`. Dedup by message id in `wa_msgs`.
