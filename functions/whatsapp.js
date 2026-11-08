@@ -170,13 +170,49 @@ ${deviceList(v, cfg)}`;
     }
   }
 
+  // ---- voice notes ----
+  const MAX_AUDIO = 1.5 * 1024 * 1024;   // ~a minute or more of WhatsApp opus
+  async function transcribe(mediaId) {
+    const auth = { Authorization: 'Bearer ' + WA_TOKEN.value().trim() };
+    const meta = await fetch(`${GRAPH}/${mediaId}`, { headers: auth }).then((r) => r.json()).catch(() => ({}));
+    if (!meta.url) { console.error('whatsapp media lookup failed', JSON.stringify(meta).slice(0, 200)); return { error: 'לא הצלחתי לקבל את ההקלטה 😕 נסו שוב.' }; }
+    if (meta.file_size > MAX_AUDIO) return { error: 'ההקלטה ארוכה מדי. נסו הודעה קצרה, עד דקה 🎤' };
+    const bin = await fetch(meta.url, { headers: auth }).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
+    if (!bin) return { error: 'לא הצלחתי להוריד את ההקלטה 😕 נסו שוב.' };
+    const cfgSnap = await db.doc('config/app').get();
+    const model = (cfgSnap.exists && cfgSnap.data().geminiModel) || MODEL_DEFAULT;
+    const ai = await gemini();
+    const res = await ai.models.generateContent({
+      model,
+      contents: [{ role: 'user', parts: [
+        { inlineData: { mimeType: String(meta.mime_type || 'audio/ogg').split(';')[0], data: Buffer.from(bin).toString('base64') } },
+        { text: 'Transcribe this voice message exactly, in the language spoken (usually Hebrew). It is a request to a smart home. Output only the transcript, no quotes or notes. If there is no intelligible speech, output exactly: EMPTY' },
+      ] }],
+      config: { temperature: 0 },
+    });
+    const t = (res.text || '').trim().replace(/^["“”]+|["“”]+$/g, '');
+    console.log('whatsapp voice', bin.byteLength, 'bytes →', t.slice(0, 80));
+    if (!t || t === 'EMPTY') return { error: 'לא הצלחתי להבין את ההקלטה 🎤 אפשר לחזור על זה, או לכתוב?' };
+    return { text: t.slice(0, 1000) };
+  }
+
   // ---- one incoming message ----
-  async function handle(from, text, phoneId) {
+  // input: { text } or { audioId } (a voice note)
+  async function handle(from, input, phoneId) {
     const snap = await db.collection('members').where('phone', '==', from).limit(1).get();
     if (snap.empty) { console.log('whatsapp: unknown sender', from.slice(0, 5) + '…'); return; } // stay silent
     const doc = snap.docs[0];
     const m = { email: doc.id, ...doc.data() };
     if (m.role === 'tablet') return;
+
+    // voice notes become text first (only for known members, so strangers can't run up costs)
+    let text = input.text, heard = '';
+    if (input.audioId) {
+      const r = await transcribe(input.audioId);
+      if (r.error) { await send(phoneId, from, r.error); return; }
+      text = heard = r.text;
+    }
+    const say = (t) => send(phoneId, from, (heard ? `🎤 "${heard}"\n` : '') + t);
 
     const chatRef = db.doc('wa_chats/' + from);
     const chatSnap = await chatRef.get();
@@ -185,14 +221,14 @@ ${deviceList(v, cfg)}`;
     const history = fresh ? (chat.turns || []).slice(-6) : [];
 
     let v;
-    try { v = await view(m); } catch { await send(phoneId, from, 'הבית לא עונה כרגע 😕 נסו שוב עוד מעט.'); return; }
+    try { v = await view(m); } catch { await say('הבית לא עונה כרגע 😕 נסו שוב עוד מעט.'); return; }
 
     // a pending door unlock waits for "כן"
     if (chat.pending && Date.now() - chat.pending.at < 3 * 60 * 1000) {
       await chatRef.set({ pending: null }, { merge: true });
       if (YES.test(text)) {
-        try { await runCalls(m, v, chat.pending.calls); await send(phoneId, from, '✅ פתחתי.'); }
-        catch (e) { await send(phoneId, from, 'לא הצלחתי: ' + e.message); }
+        try { await runCalls(m, v, chat.pending.calls); await say('✅ פתחתי.'); }
+        catch (e) { await say('לא הצלחתי: ' + e.message); }
         return;
       }
     }
@@ -244,7 +280,7 @@ ${deviceList(v, cfg)}`;
       at: Date.now(), pending,
       turns: [...history, { r: 'u', t: text }, { r: 'm', t: reply }].slice(-6),
     });
-    await send(phoneId, from, reply);
+    await say(reply);
   }
 
   return onRequest(
@@ -270,8 +306,9 @@ ${deviceList(v, cfg)}`;
         await db.doc('wa_msgs/' + msg.id).create({ at: Date.now() });
       } catch { res.sendStatus(200); return; }
       try {
-        if (msg.type !== 'text') await send(phoneId, from, 'כרגע אני מבין רק הודעות טקסט ✍️');
-        else await handle(from, String(msg.text?.body || '').slice(0, 1000), phoneId);
+        if (msg.type === 'text') await handle(from, { text: String(msg.text?.body || '').slice(0, 1000) }, phoneId);
+        else if (msg.type === 'audio' && msg.audio?.id) await handle(from, { audioId: msg.audio.id }, phoneId);
+        else await send(phoneId, from, 'אני מבין הודעות טקסט והודעות קוליות 🎤✍️');
       } catch (e) {
         console.error('whatsapp handle failed', e);
         await send(phoneId, from, 'משהו השתבש 😕 נסו שוב.').catch(() => {});
