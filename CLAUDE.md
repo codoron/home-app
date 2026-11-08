@@ -32,4 +32,4 @@ Family smart-home web app over Doron's Home Assistant. Separate from family-app 
 - Sender → member by `members/{email}.phone` (normalized `9725…`, set in the family tab); unknown numbers get no reply; tablet ignored.
 - Gemini via `@google/genai` on Vertex AI (location `global`, model `gemini-3.8-flash`, override `config/app.geminiModel`; Gemini 2.5 was retired on Vertex on 2026-10-20). Tools: `control`, `tv_channel`; every call goes through `runCalls` (same checks as haCall). Prompt lists only that member's devices.
 - Unlock needs "כן" within 3 min (`wa_chats/{phone}.pending`). Short history (6 turns, 10 min) in `wa_chats`. Dedup by message id in `wa_msgs`.
-- Meta test number (≤5 verified recipients). Runtime SA needs `roles/aiplatform.user`.
+- Meta app "OurHome" (published; privacy page public/privacy.html), test number +1 555 177-2553, WABA id 2095741247730179 subscribed via POST /{waba}/subscribed_apps (without it Meta delivers nothing). Test numbers can't start a chat: Meta sends a template first, then users reply. ≤5 verified recipients. Runtime SA needs `roles/aiplatform.user`.
