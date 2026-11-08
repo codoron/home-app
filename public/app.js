@@ -352,12 +352,13 @@ function viewFamily() {
       ? `<div class="edit-row">
           <select data-mrole="${esc(m.id)}">${Object.entries(ROLE).map(([k, v]) => `<option value="${k}" ${m.role === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
           <select data-mroom="${esc(m.id)}">${areaOpts(m.room)}</select>
+          ${m.role !== 'tablet' ? `<input class="phone-in" data-mphone="${esc(m.id)}" value="${esc(fmtPhone(m.phone))}" placeholder="טלפון לוואטסאפ" inputmode="tel" dir="ltr">` : ''}
           ${m.id !== me.email ? `<button class="btn small" data-wa="${esc(m.id)}">הזמנה בוואטסאפ</button><button class="btn small" data-mail="${esc(m.id)}">במייל</button><button class="btn small danger" data-mdel="${esc(m.id)}">הסרה</button>` : ''}
         </div>`
       : parent && m.role === 'child'
         ? `<div class="edit-row"><select data-mroom="${esc(m.id)}">${areaOpts(m.room)}</select></div>` : '';
     h += `<div class="card"><div class="person"><div class="avatar">${esc((m.name || '?')[0])}</div>
-      <div class="who"><b>${esc(m.name)}</b><span class="tag">${ROLE[m.role] || m.role}</span>${m.lastSeen ? '' : '<span class="tag wait">עוד לא נכנס/ה</span>'}<small>${esc(nameOfArea(m.room))} · ${esc(m.id)}</small></div></div>${edit}</div>`;
+      <div class="who"><b>${esc(m.name)}</b><span class="tag">${ROLE[m.role] || m.role}</span>${m.lastSeen ? '' : '<span class="tag wait">עוד לא נכנס/ה</span>'}<small>${esc(nameOfArea(m.room))} · ${esc(m.id)}${m.phone ? ' · 💬 ' + esc(fmtPhone(m.phone)) : ''}</small></div></div>${edit}</div>`;
   }
   h += `</div>`;
 
@@ -366,6 +367,7 @@ function viewFamily() {
       <form class="card form" id="addMember">
         <div class="row"><input name="name" placeholder="שם" required><input name="email" type="email" placeholder="מייל Google" required dir="ltr"></div>
         <div class="row"><select name="role"><option value="child">ילד/ה</option><option value="parent">הורה</option><option value="tablet">טאבלט משותף</option></select><select name="room">${areaOpts('')}</select></div>
+        <div class="row"><input name="phone" placeholder="טלפון לוואטסאפ (לא חובה)" inputmode="tel" dir="ltr"></div>
         <button class="btn primary">הוספה</button>
         <small class="hello">אחרי ההוספה שלחו להם את הכתובת: ${esc(location.origin)}</small>
       </form>`;
@@ -956,6 +958,10 @@ function quick(k, scopeRoom) {
 }
 
 /* ---------- members ---------- */
+// phones are stored as the WhatsApp sender id: 972501234567
+const normPhone = (p) => { let d = String(p || '').replace(/\D/g, ''); if (d.startsWith('00')) d = d.slice(2); if (d.startsWith('0')) d = '972' + d.slice(1); return d; };
+const fmtPhone = (p) => (p && p.startsWith('972') ? '0' + p.slice(3).replace(/^(\d{2})(\d{3})(\d+)$/, '$1-$2-$3') : p || '');
+
 function inviteText(m) {
   return `היי ${m.name}! 🏠\nהוזמנת לאפליקציה "הבית שלנו", שבה שולטים בבית החכם.\n` +
     `נכנסים עם חשבון ה־Google של ${m.id}:\n${location.origin}\n` +
@@ -1028,6 +1034,13 @@ document.addEventListener('change', async (ev) => {
   try {
     if (ds.mrole) await updateDoc(doc(db, 'members', ds.mrole), { role: t.value });
     if (ds.mroom) await updateDoc(doc(db, 'members', ds.mroom), { room: t.value || null });
+    if (ds.mphone) {
+      const ph = normPhone(t.value);
+      if (t.value.trim() && !/^972\d{8,9}$/.test(ph)) { toast('מספר לא תקין'); return; }
+      if (ph && S.members.some((x) => x.id !== ds.mphone && x.phone === ph)) { toast('המספר כבר רשום לבן משפחה אחר'); return; }
+      await updateDoc(doc(db, 'members', ds.mphone), { phone: ph || null });
+      toast('הטלפון נשמר ✓');
+    }
     if (ds.shared) {
       const set = new Set(S.data.sharedAreas || []);
       t.checked ? set.add(ds.shared) : set.delete(ds.shared);
@@ -1045,7 +1058,7 @@ document.addEventListener('submit', async (ev) => {
   const email = f.email.trim().toLowerCase();
   if (!email.includes('@')) return toast('מייל לא תקין');
   try {
-    await setDoc(doc(db, 'members', email), { name: f.name.trim(), role: f.role, room: f.room || null, favorites: [], admin: false, created: Date.now() });
+    await setDoc(doc(db, 'members', email), { name: f.name.trim(), role: f.role, room: f.room || null, phone: normPhone(f.phone) || null, favorites: [], admin: false, created: Date.now() });
     ev.target.reset();
     toast(`${f.name} נוספ/ה ✓`);
     if (confirm(`לשלוח ל${f.name} הזמנה בוואטסאפ?`)) invite({ id: email, name: f.name.trim() }, 'wa');

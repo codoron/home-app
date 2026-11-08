@@ -193,12 +193,8 @@ exports.haStates = onCall(SECRETS, async (req) => {
   };
 });
 
-exports.haCall = onCall(SECRETS, async (req) => {
-  const m = await getMember(req);
-  const calls = (req.data && req.data.calls) || [];
-  if (!Array.isArray(calls) || !calls.length || calls.length > 80) throw new HttpsError('invalid-argument', 'bad calls');
-  const v = await view(m);
-
+// Validates calls against what this member may do (same rules for the app and for WhatsApp) and runs them.
+async function runCalls(m, v, calls) {
   const groups = {};
   for (const c of calls) {
     const e = String(c.e || ''), s = String(c.s || ''), d = dom(e);
@@ -224,7 +220,7 @@ exports.haCall = onCall(SECRETS, async (req) => {
   for (const g of Object.values(groups)) {
     await ha(`/api/services/${g.d}/${g.s}`, { method: 'POST', body: JSON.stringify({ entity_id: g.ids, ...g.data }) });
   }
-  // IR air conditioners report no state: remember the last command sent, for everyone to see
+  // IR air conditioners and fans report no state: remember the last command sent, for everyone to see
   const runs = {};
   for (const c of calls) {
     const e = String(c.e);
@@ -232,5 +228,15 @@ exports.haCall = onCall(SECRETS, async (req) => {
     if (dom(e) === 'script' && (AC_RE.test(txt) || (FAN_RE.test(txt) && !/light|אור|תאורה|מנורה/i.test(txt)))) runs[e.replace(/\./g, '__')] = { at: Date.now(), by: m.name || m.email };
   }
   if (Object.keys(runs).length) await db.doc('config/runs').set(runs, { merge: true }).catch(() => {});
+}
+
+exports.haCall = onCall(SECRETS, async (req) => {
+  const m = await getMember(req);
+  const calls = (req.data && req.data.calls) || [];
+  if (!Array.isArray(calls) || !calls.length || calls.length > 80) throw new HttpsError('invalid-argument', 'bad calls');
+  const v = await view(m);
+  await runCalls(m, v, calls);
   return { ok: true };
 });
+
+exports.whatsapp = require('./whatsapp')({ ha, view, runCalls, db, dom, objId, SERVICES, HA_URL, HA_TOKEN });

@@ -15,7 +15,7 @@ Family smart-home web app over Doron's Home Assistant. Separate from family-app 
 ## Architecture
 - `public/` static, Firebase JS SDK 10.12.2 from gstatic. Bump `?v=` in index.html when app.js/style.css change.
 - `functions/index.js` (Node 22, europe-west1): `haStates` (areas via `/api/template`, states via `/api/states`, filtered per member) and `haCall` (whitelisted domain/services, permission-checked). Secrets `HA_URL`, `HA_TOKEN`.
-- Firestore: `members/{email}` {name, role parent|child|tablet, room (HA area id), favorites[], layout{}, admin, extraAreas?}; `config/app` {sharedAreas[], channels[{n,name}]}.
+- Firestore: `members/{email}` {name, role parent|child|tablet, room (HA area id), favorites[], layout{}, phone?, admin, extraAreas?}; `config/app` {sharedAreas[], channels[{n,name}], geminiModel?}.
 - Permissions: parents and the shared living-room `tablet` account all (tablet: clock/status header, wake lock, auto-return to house after 60s idle, no family tab, slower polling when idle); children own room + sharedAreas (+extraAreas); `lock` is parent-only. System admin co.doron@gmail.com (functions `SYS`, rules `sys()`, `public/config.js`).
 - TV remote: a `media_player` gets `remote` (Android TV Remote entity with the same object id/name) and `vol_up/vol_down/vol_mute` (Broadlink TV volume scripts, matched by object id; only for TVs in a room that has an IR blaster, i.e. a remote not linked to any TV, falling back to the living room. The parents' Yes box has no volume). Tapping it opens the remote sheet. `remote.send_command` only accepts keys in `REMOTE_KEYS`. The Yes box ignores CHANNEL_UP and DPAD_UP opens its menu: channels change by sending digits (delay 0.3s). Shared channel list in `config/app.channels` (parents edit).
 - Room grouping (frontend `groupRoom`): lamps (+ "all on/off" light scripts) → one "תאורה" card; ≥2 AC IR scripts → one "מזגן" card showing the last command (`config/runs`, written by haCall for AC scripts, returned as `runs`); TV volume scripts hidden (they live in the remote), other media players/TV scripts shown inside the TV remote ("עוד בחדר"); unavailable devices folded under "לא זמינים". Group ids `group:<room>:<kind>` can be favorites. Sheets (`.sheet`: #remote, #gsheet) close via history; `S.skipPop` stops the × close from also leaving the room.
@@ -27,5 +27,9 @@ Family smart-home web app over Doron's Home Assistant. Separate from family-app 
 ## Testing locally
 `node --check` the JS; render with Playwright, routing gstatic firebase imports to small mock modules.
 
-## Next
-WhatsApp bot (Meta Cloud API webhook → Gemini → haCall with the sender's permissions).
+## WhatsApp bot
+- `functions/whatsapp.js` → function `whatsapp` (onRequest, public): GET = Meta verify handshake (`WA_VERIFY`), POST = message, checked with `x-hub-signature-256` (`WA_APP_SECRET`). Replies via Graph v23.0 with `WA_TOKEN`.
+- Sender → member by `members/{email}.phone` (normalized `9725…`, set in the family tab); unknown numbers get no reply; tablet ignored.
+- Gemini via `@google/genai` on Vertex AI (location `global`, model `gemini-3.8-flash`, override `config/app.geminiModel`; Gemini 2.5 was retired on Vertex on 2026-10-20). Tools: `control`, `tv_channel`; every call goes through `runCalls` (same checks as haCall). Prompt lists only that member's devices.
+- Unlock needs "כן" within 3 min (`wa_chats/{phone}.pending`). Short history (6 turns, 10 min) in `wa_chats`. Dedup by message id in `wa_msgs`.
+- Meta test number (≤5 verified recipients). Runtime SA needs `roles/aiplatform.user`.
