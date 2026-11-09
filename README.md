@@ -40,45 +40,9 @@ Home Assistant is great for the person who sets it up and too much for everyone 
 
 ## 🏗️ Architecture
 
-```mermaid
-flowchart TB
-  subgraph Clients["👨‍👩‍👧‍👦 Family"]
-    direction LR
-    APP["📱 Web app · PWA<br/>phones + living-room tablet<br/>Hebrew RTL"]
-    W["💬 WhatsApp<br/>text + voice notes"]
-  end
+<p align="center"><img src="docs/architecture.svg" alt="System architecture" width="100%"></p>
 
-  M["Meta WhatsApp<br/>Cloud API"]
-  GH["⚙️ GitHub Actions<br/>CI/CD on push to main"]
-
-  subgraph Cloud["🔥 Firebase / Google Cloud · europe-west1"]
-    direction LR
-    H["Hosting + Auth<br/>static app · Google sign-in"]
-    F["Cloud Functions · Node 22<br/><b>haStates · haCall · whatsapp</b><br/>one permission check for all"]
-    DB[("Firestore<br/>members · layout · config<br/>runs · chats")]
-    G["🧠 Vertex AI<br/>Gemini 3.8 Flash"]
-    S["🔑 Secret Manager"]
-  end
-
-  subgraph Home["🏡 Home"]
-    direction LR
-    HA["Home Assistant<br/>Raspberry Pi · via Nabu Casa"]
-    BL["Broadlink RM4<br/>IR + RF 433<br/>AC · TV · fan · shutters"]
-    ATV["Android TV Remote<br/>Yes box"]
-    DEV["Sonoff · Shelly · Nuki<br/>LG webOS · Cast"]
-  end
-
-  APP -- "sign-in · callable functions" --> H
-  APP --> F
-  W <--> M
-  M -- "signed webhook ⇄ replies" --> F
-  F <--> DB
-  F --- S
-  F -- "tools · transcription" --> G
-  F -- "REST API" --> HA
-  HA --> BL & ATV & DEV
-  GH -. "deploy" .-> Cloud
-```
+<sub>Also as a <a href="docs/architecture.png">PNG</a>.</sub>
 
 ### What happens when someone sends a voice note
 
