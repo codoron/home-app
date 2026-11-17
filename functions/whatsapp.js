@@ -79,6 +79,61 @@ module.exports = ({ ha, view, runCalls, db, dom, objId, getMember, HA_URL, HA_TO
     ],
   }];
 
+  // app only: a spoken reminder on a Google speaker, played by the `reminders` scheduler (index.js)
+  const REMIND_TOOL = {
+    name: 'remind',
+    description: 'Schedule a spoken reminder on a Google speaker. Give either minutes (from now) or at (HH:MM, Israel time, the next time it comes).',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        text: { type: 'STRING', description: 'What to say, short, in the user\'s language (e.g. "להוציא את הכביסה")' },
+        minutes: { type: 'NUMBER', description: 'In how many minutes from now' },
+        at: { type: 'STRING', description: 'Clock time HH:MM (Israel), instead of minutes' },
+        speaker: { type: 'STRING', description: 'Exact id of a speaker from the list. Omit to use the speaker in the user\'s room (or the living room).' },
+      },
+      required: ['text'],
+    },
+  };
+  const toolsFor = (channel) => channel === 'app'
+    ? [{ functionDeclarations: [...TOOLS[0].functionDeclarations, REMIND_TOOL] }] : TOOLS;
+
+  const isSpeaker = (e) => e && dom(e.id) === 'media_player' && !e.remote &&
+    (e.device_class === 'speaker' || /speaker|רמקול|nest|google ?home|home mini|hub|sonos/i.test(e.name + ' ' + e.id));
+  // Israel time "HH:MM" → the next such moment (ms)
+  function nextAt(hhmm) {
+    const mt = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim());
+    if (!mt || +mt[1] > 23 || +mt[2] > 59) return null;
+    const now = Date.now();
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(now)).map((x) => [x.type, x.value]));
+    const nowMin = (+p.hour % 24) * 60 + +p.minute;
+    let diff = (+mt[1] * 60 + +mt[2]) - nowMin;
+    if (diff <= 0) diff += 24 * 60;
+    return Math.floor(now / 60000) * 60000 + diff * 60000;
+  }
+  async function addReminder(m, v, a) {
+    const text = String(a.text || '').trim().slice(0, 200);
+    if (!text) throw new HttpsError('invalid-argument', 'missing reminder text');
+    let at;
+    if (a.at) at = nextAt(a.at);
+    else if (a.minutes != null) { const n = Number(a.minutes); if (n >= 1 && n <= 24 * 60) at = Date.now() + Math.round(n) * 60000; }
+    if (!at) throw new HttpsError('invalid-argument', 'time must be 1 minute to 24 hours ahead (minutes or HH:MM)');
+    const speakers = Object.values(v.entities).filter(isSpeaker);
+    let sp = a.speaker && v.entities[a.speaker];
+    if (a.speaker && !isSpeaker(sp)) throw new HttpsError('invalid-argument', 'not a speaker this user may use: ' + a.speaker);
+    if (!sp) {
+      const areaOf = {}; for (const ar of v.areas) for (const e of ar.entities) areaOf[e] = ar;
+      sp = speakers.find((x) => areaOf[x.id] && areaOf[x.id].id === m.room) ||
+        speakers.find((x) => areaOf[x.id] && /living|סלון/i.test(areaOf[x.id].id + ' ' + areaOf[x.id].name)) || speakers[0];
+    }
+    if (!sp) throw new HttpsError('failed-precondition', 'no Google speaker available to this user');
+    const open = await db.collection('reminders').where('email', '==', m.email).where('status', '==', 'pending').get();
+    if (open.size >= 20) throw new HttpsError('resource-exhausted', 'too many pending reminders (20)');
+    await db.collection('reminders').add({ email: m.email, name: m.role === 'tablet' ? '' : (m.name || ''), text, speaker: sp.id, at, status: 'pending', created: Date.now() });
+    const when = new Date(at).toLocaleTimeString('he-IL', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
+    return { status: 'scheduled', at: when, speaker: sp.name };
+  }
+
   function toCall(v, name, a) {
     if (name === 'tv_channel') {
       const tv = v.entities[a.tv_entity_id];
@@ -107,7 +162,7 @@ module.exports = ({ ha, view, runCalls, db, dom, objId, getMember, HA_URL, HA_TO
       const e = v.entities[id];
       let st = e.state;
       if (e.unit_of_measurement) st += e.unit_of_measurement;
-      const extra = e.remote ? ' (TV box: use tv_channel for channels)' : '';
+      const extra = e.remote ? ' (TV box: use tv_channel for channels)' : isSpeaker(e) ? ' (Google speaker: can play reminders)' : '';
       return `- ${id} | ${e.name} | ${st}${extra}`;
     };
     const skip = new Set();
@@ -153,7 +208,7 @@ Rules:
 - If the box was already on (the tool note says so), the screen is assumed on. Mention briefly that if the screen is dark they can say "תדליק את המסך".
 - Run the screen power script only when the user explicitly talks about the screen being dark/off, or to turn the TV off (turn off the box and run the screen script once). Never toggle the screen twice.
 - After acting, confirm briefly what you did. If a tool returns an error, explain it simply.
-- Unlocking a door needs a confirmation; the tool will tell you. Then ask the user to ${channel === 'app' ? 'say or tap "כן"' : 'reply "כן"'}.
+${channel === 'app' ? `- Reminders: "תזכיר לי בעוד X / בשעה HH:MM ..." → call remind (it is spoken on a Google speaker; by default the one in the user's room, or the living room). Then confirm the time and speaker from the tool result. Reminders work up to 24 hours ahead.\n` : ''}- Unlocking a door needs a confirmation; the tool will tell you. Then ask the user to ${channel === 'app' ? 'say or tap "כן"' : 'reply "כן"'}.
 
 Devices this user may use (id | name | state):
 ${deviceList(v, cfg)}`;
@@ -271,7 +326,7 @@ ${deviceList(v, cfg)}`;
     for (let round = 0; round < 4; round++) {
       const res = await ai.models.generateContent({
         model, contents,
-        config: { systemInstruction: systemPrompt(m, v, cfg, channel), tools: TOOLS, temperature: 0.2 },
+        config: { systemInstruction: systemPrompt(m, v, cfg, channel), tools: toolsFor(channel), temperature: 0.2 },
       });
       const calls = res.functionCalls || [];
       if (!calls.length) { reply = (res.text || '').trim(); break; }
@@ -280,6 +335,13 @@ ${deviceList(v, cfg)}`;
       for (const fc of calls) {
         let response;
         try {
+          if (fc.name === 'remind') {
+            if (channel !== 'app') throw new HttpsError('failed-precondition', 'reminders only from the app');
+            response = await addReminder(m, v, fc.args || {});
+            console.log('remind', JSON.stringify(fc.args), response.status);
+            parts.push({ functionResponse: { name: fc.name, response } });
+            continue;
+          }
           const call = toCall(v, fc.name, fc.args || {});
           if (call.s === 'unlock') {
             if (!v.entities[call.e]) throw new HttpsError('permission-denied', 'אין הרשאה');

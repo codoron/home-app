@@ -3,6 +3,7 @@
 // and which rooms/entities they may see or control.
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { setGlobalOptions } = require('firebase-functions/v2');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 
@@ -260,3 +261,42 @@ exports.haCall = onCall(SECRETS, async (req) => {
 const bot = require('./whatsapp')({ ha, view, runCalls, db, dom, objId, getMember, SERVICES, HA_URL, HA_TOKEN });
 exports.whatsapp = bot.whatsapp;
 exports.voice = bot.voice;   // voice commands from the app (same Gemini brain as WhatsApp)
+
+// Spoken reminders (set by voice in the app): every minute, speak the due ones on their Google speaker via HA TTS.
+// TTS engine: config/app.ttsEntity / ttsLanguage override; otherwise Nabu Casa cloud (he-IL), else the first tts.* entity.
+exports.reminders = onSchedule({ schedule: 'every 1 minutes', timeZone: 'Asia/Jerusalem', secrets: [HA_URL, HA_TOKEN], retryCount: 0, timeoutSeconds: 120 }, async () => {
+  // single-field query (no composite index needed); few reminders are ever pending
+  const pend = await db.collection('reminders').where('status', '==', 'pending').get();
+  const due = { docs: pend.docs.filter((d) => d.data().at <= Date.now()).slice(0, 20) };
+  if (!due.docs.length) return;
+  const cfg = await getCfg();
+  let tts = cfg.ttsEntity, lang = cfg.ttsLanguage;
+  if (!tts) {
+    const states = await ha('/api/states');
+    const ids = states.map((s) => s.entity_id).filter((e) => dom(e) === 'tts');
+    tts = ids.find((e) => /cloud/.test(e)) || ids.find((e) => /google/.test(e)) || ids[0];
+  }
+  if (!lang) lang = /google_translate/.test(tts || '') ? 'iw' : 'he-IL';
+  for (const d of due.docs) {
+    const r = d.data();
+    // claim it, so an overlapping run won't speak it twice
+    const claimed = await db.runTransaction(async (tx) => {
+      const cur = await tx.get(d.ref);
+      if (cur.data().status !== 'pending') return false;
+      tx.update(d.ref, { status: 'sending' }); return true;
+    });
+    if (!claimed) continue;
+    const message = (r.name ? `תזכורת ל${r.name}: ` : 'תזכורת: ') + r.text;
+    try {
+      if (!tts) throw new Error('no tts entity in Home Assistant');
+      await ha('/api/services/tts/speak', { method: 'POST', body: JSON.stringify({ entity_id: tts, media_player_entity_id: r.speaker, message, language: lang }) });
+      await d.ref.update({ status: 'done', doneAt: Date.now() });
+      console.log('reminder spoken', r.speaker, r.text.slice(0, 40));
+    } catch (e) {
+      const tries = (r.tries || 0) + 1;
+      // a short HA outage: try again next minute, up to 3 times
+      await d.ref.update(tries < 3 ? { status: 'pending', tries, error: e.message } : { status: 'failed', tries, error: e.message });
+      console.error('reminder failed', d.id, e.message);
+    }
+  }
+});
