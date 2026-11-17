@@ -2,7 +2,7 @@
 // Meta posts every incoming message here. The sender is identified by phone number (members/{email}.phone),
 // Gemini only sees the devices that member may use, and every action goes through runCalls (same checks as the app).
 const crypto = require('crypto');
-const { onRequest, HttpsError } = require('firebase-functions/v2/https');
+const { onRequest, onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 
 const WA_TOKEN = defineSecret('WA_TOKEN');           // permanent (system user) token
@@ -26,7 +26,7 @@ const normPhone = (p) => {
   return d;
 };
 
-module.exports = ({ ha, view, runCalls, db, dom, objId, HA_URL, HA_TOKEN }) => {
+module.exports = ({ ha, view, runCalls, db, dom, objId, getMember, HA_URL, HA_TOKEN }) => {
   let genai = null;
   async function gemini() {
     if (!genai) {
@@ -132,12 +132,16 @@ module.exports = ({ ha, view, runCalls, db, dom, objId, HA_URL, HA_TOKEN }) => {
     return out.join('\n');
   }
 
-  function systemPrompt(m, v, cfg) {
+  function systemPrompt(m, v, cfg, channel) {
     const now = new Date().toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' });
-    return `You are the smart home of the Cohen-Netzer family, talking on WhatsApp with ${m.name} (${m.role === 'child' ? 'a child' : 'a parent'}).
+    const who = m.role === 'tablet' ? 'whoever in the family is standing at the shared living-room tablet'
+      : `${m.name} (${m.role === 'child' ? 'a child' : 'a parent'})`;
+    const where = channel === 'app' ? 'by voice in the family home app (your reply is shown and read aloud)' : 'on WhatsApp';
+    const style = channel === 'app' ? 'Plain text, no markdown, no emoji (it is spoken). One or two short sentences.' : 'Plain text, no markdown; one emoji at most.';
+    return `You are the smart home of the Cohen-Netzer family, talking ${where} with ${who}.
 Now: ${now} (Israel).
 Rules:
-- Reply in the language the user wrote in (usually Hebrew). Be short and warm. Plain text, no markdown; one emoji at most.
+- Reply in the language the user wrote in (usually Hebrew). Be short and warm. ${style}
 - Act only on devices in the list below, using their exact ids. If a request matches nothing in the list, say you can't do it (the user may not have access).
 - If the request is ambiguous (e.g. "the light" when a room has several), ask one short question instead of guessing.
 - Air conditioners and fans are IR scripts (e.g. "AC cool 22", "Bedroom fan low"): run the script that matches the requested mode with action "run". They report no state.
@@ -149,7 +153,7 @@ Rules:
 - If the box was already on (the tool note says so), the screen is assumed on. Mention briefly that if the screen is dark they can say "תדליק את המסך".
 - Run the screen power script only when the user explicitly talks about the screen being dark/off, or to turn the TV off (turn off the box and run the screen script once). Never toggle the screen twice.
 - After acting, confirm briefly what you did. If a tool returns an error, explain it simply.
-- Unlocking a door needs a confirmation; the tool will tell you. Then ask the user to reply "כן".
+- Unlocking a door needs a confirmation; the tool will tell you. Then ask the user to ${channel === 'app' ? 'say or tap "כן"' : 'reply "כן"'}.
 
 Devices this user may use (id | name | state):
 ${deviceList(v, cfg)}`;
@@ -182,6 +186,25 @@ ${deviceList(v, cfg)}`;
 
   // ---- voice notes ----
   const MAX_AUDIO = 1.5 * 1024 * 1024;   // ~a minute or more of WhatsApp opus
+  // audio bytes → text, with the same Gemini model. { text } or { error } (a Hebrew message for the user)
+  async function speechToText(buf, mime, tag) {
+    const cfgSnap = await db.doc('config/app').get();
+    const model = (cfgSnap.exists && cfgSnap.data().geminiModel) || MODEL_DEFAULT;
+    const ai = await gemini();
+    const res = await ai.models.generateContent({
+      model,
+      contents: [{ role: 'user', parts: [
+        { inlineData: { mimeType: String(mime || 'audio/ogg').split(';')[0], data: Buffer.from(buf).toString('base64') } },
+        { text: 'Transcribe this voice message exactly, in the language spoken (usually Hebrew). It is a request to a smart home. Output only the transcript, no quotes or notes. If there is no intelligible speech, output exactly: EMPTY' },
+      ] }],
+      config: { temperature: 0 },
+    });
+    const t = (res.text || '').trim().replace(/^["“”]+|["“”]+$/g, '');
+    console.log(tag, 'voice', buf.byteLength, 'bytes →', t.slice(0, 80));
+    if (!t || t === 'EMPTY') return { error: 'לא הצלחתי להבין את ההקלטה 🎤 אפשר לחזור על זה, או לכתוב?' };
+    return { text: t.slice(0, 1000) };
+  }
+
   async function transcribe(mediaId) {
     const auth = { Authorization: 'Bearer ' + WA_TOKEN.value().trim() };
     const meta = await fetch(`${GRAPH}/${mediaId}`, { headers: auth }).then((r) => r.json()).catch(() => ({}));
@@ -189,21 +212,7 @@ ${deviceList(v, cfg)}`;
     if (meta.file_size > MAX_AUDIO) return { error: 'ההקלטה ארוכה מדי. נסו הודעה קצרה, עד דקה 🎤' };
     const bin = await fetch(meta.url, { headers: auth }).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
     if (!bin) return { error: 'לא הצלחתי להוריד את ההקלטה 😕 נסו שוב.' };
-    const cfgSnap = await db.doc('config/app').get();
-    const model = (cfgSnap.exists && cfgSnap.data().geminiModel) || MODEL_DEFAULT;
-    const ai = await gemini();
-    const res = await ai.models.generateContent({
-      model,
-      contents: [{ role: 'user', parts: [
-        { inlineData: { mimeType: String(meta.mime_type || 'audio/ogg').split(';')[0], data: Buffer.from(bin).toString('base64') } },
-        { text: 'Transcribe this voice message exactly, in the language spoken (usually Hebrew). It is a request to a smart home. Output only the transcript, no quotes or notes. If there is no intelligible speech, output exactly: EMPTY' },
-      ] }],
-      config: { temperature: 0 },
-    });
-    const t = (res.text || '').trim().replace(/^["“”]+|["“”]+$/g, '');
-    console.log('whatsapp voice', bin.byteLength, 'bytes →', t.slice(0, 80));
-    if (!t || t === 'EMPTY') return { error: 'לא הצלחתי להבין את ההקלטה 🎤 אפשר לחזור על זה, או לכתוב?' };
-    return { text: t.slice(0, 1000) };
+    return speechToText(bin, meta.mime_type, 'whatsapp');
   }
 
   // ---- one incoming message ----
@@ -224,22 +233,26 @@ ${deviceList(v, cfg)}`;
     }
     const say = (t) => send(phoneId, from, (heard ? `🎤 "${heard}"\n` : '') + t);
 
-    const chatRef = db.doc('wa_chats/' + from);
+    const r = await converse(m, text, db.doc('wa_chats/' + from), 'whatsapp');
+    await say(r.reply);
+  }
+
+  // One turn of conversation: a pending unlock, short history, Gemini with tools. Returns { reply, pending }.
+  async function converse(m, text, chatRef, channel) {
     const chatSnap = await chatRef.get();
     const chat = chatSnap.exists ? chatSnap.data() : {};
     const fresh = chat.at && Date.now() - chat.at < 10 * 60 * 1000;
     const history = fresh ? (chat.turns || []).slice(-6) : [];
 
     let v;
-    try { v = await view(m); } catch { await say('הבית לא עונה כרגע 😕 נסו שוב עוד מעט.'); return; }
+    try { v = await view(m); } catch { return { reply: 'הבית לא עונה כרגע 😕 נסו שוב עוד מעט.' }; }
 
     // a pending door unlock waits for "כן"
     if (chat.pending && Date.now() - chat.pending.at < 3 * 60 * 1000) {
       await chatRef.set({ pending: null }, { merge: true });
       if (YES.test(text)) {
-        try { await runCalls(m, v, chat.pending.calls); await say('✅ פתחתי.'); }
-        catch (e) { await say('לא הצלחתי: ' + e.message); }
-        return;
+        try { await runCalls(m, v, chat.pending.calls); return { reply: '✅ פתחתי.', done: true }; }
+        catch (e) { return { reply: 'לא הצלחתי: ' + e.message }; }
       }
     }
 
@@ -254,10 +267,11 @@ ${deviceList(v, cfg)}`;
     let reply = '';
     let pending = null;
     const woke = new Map();   // TVs turned on during this message
+    let acted = false;
     for (let round = 0; round < 4; round++) {
       const res = await ai.models.generateContent({
         model, contents,
-        config: { systemInstruction: systemPrompt(m, v, cfg), tools: TOOLS, temperature: 0.2 },
+        config: { systemInstruction: systemPrompt(m, v, cfg, channel), tools: TOOLS, temperature: 0.2 },
       });
       const calls = res.functionCalls || [];
       if (!calls.length) { reply = (res.text || '').trim(); break; }
@@ -270,7 +284,7 @@ ${deviceList(v, cfg)}`;
           if (call.s === 'unlock') {
             if (!v.entities[call.e]) throw new HttpsError('permission-denied', 'אין הרשאה');
             pending = { calls: [call], at: Date.now() };
-            response = { status: 'needs_confirmation', message: 'Not done yet. Ask the user to reply "כן" to unlock.' };
+            response = { status: 'needs_confirmation', message: 'Not done yet. Ask the user to confirm with "כן".' };
           } else {
             let note;
             if (fc.name === 'tv_channel') note = await wakeTv(m, v, fc.args.tv_entity_id, woke);
@@ -288,6 +302,7 @@ ${deviceList(v, cfg)}`;
                 note = 'turned the box on and toggled the screen on';
               }
             }
+            acted = true;
             response = note ? { status: 'done', note } : { status: 'done' };
           }
         } catch (e) {
@@ -303,10 +318,10 @@ ${deviceList(v, cfg)}`;
       at: Date.now(), pending,
       turns: [...history, { r: 'u', t: text }, { r: 'm', t: reply }].slice(-6),
     });
-    await say(reply);
+    return { reply, pending: !!pending, acted };
   }
 
-  return onRequest(
+  const whatsapp = onRequest(
     { secrets: [HA_URL, HA_TOKEN, WA_TOKEN, WA_APP_SECRET, WA_VERIFY], invoker: 'public', timeoutSeconds: 60, memory: '512MiB' },
     async (req, res) => {
       // Meta's one-time handshake when the webhook is set up
@@ -339,6 +354,32 @@ ${deviceList(v, cfg)}`;
       res.sendStatus(200);
     },
   );
+
+  // ---- voice from the app: the same brain as WhatsApp, for the logged-in member ----
+  // data: { audio: base64, mime } or { text } (e.g. "כן" from the confirm button). Returns { heard, reply, pending, acted } or { error }.
+  const AUDIO_TYPES = /^audio\/(webm|ogg|mp4|mpeg|aac|wav|x-m4a|m4a)$/;
+  const voice = onCall({ secrets: [HA_URL, HA_TOKEN], timeoutSeconds: 60, memory: '512MiB' }, async (req) => {
+    const m = await getMember(req);
+    const d = req.data || {};
+    let text = '', heard = '';
+    if (d.audio) {
+      const mime = String(d.mime || '').split(';')[0].toLowerCase();
+      if (!AUDIO_TYPES.test(mime)) throw new HttpsError('invalid-argument', 'פורמט הקלטה לא נתמך');
+      const buf = Buffer.from(String(d.audio), 'base64');
+      if (buf.byteLength < 1500) return { error: 'ההקלטה קצרה מדי 🎤' };
+      if (buf.byteLength > MAX_AUDIO) return { error: 'ההקלטה ארוכה מדי. נסו משפט קצר.' };
+      const r = await speechToText(buf, mime, 'app ' + m.email.split('@')[0]);
+      if (r.error) return { error: r.error };
+      text = heard = r.text;
+    } else {
+      text = String(d.text || '').trim().slice(0, 1000);
+      if (!text) throw new HttpsError('invalid-argument', 'אין מה לשלוח');
+    }
+    const r = await converse(m, text, db.doc('app_chats/' + m.email), 'app');
+    return { heard, ...r };
+  });
+
+  return { whatsapp, voice };
 };
 
 module.exports.normPhone = normPhone;

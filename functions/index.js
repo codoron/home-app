@@ -257,4 +257,6 @@ exports.haCall = onCall(SECRETS, async (req) => {
   return { ok: true };
 });
 
-exports.whatsapp = require('./whatsapp')({ ha, view, runCalls, db, dom, objId, SERVICES, HA_URL, HA_TOKEN });
+const bot = require('./whatsapp')({ ha, view, runCalls, db, dom, objId, getMember, SERVICES, HA_URL, HA_TOKEN });
+exports.whatsapp = bot.whatsapp;
+exports.voice = bot.voice;   // voice commands from the app (same Gemini brain as WhatsApp)

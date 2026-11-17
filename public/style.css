@@ -354,3 +354,32 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
 .edit-row .phone-in { padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); width: 150px; }
 .rk.screen { min-height: 48px; padding: 0 12px; border-radius: 999px; display: inline-flex; gap: 6px; font-size: 14px; font-weight: 500; }
 .rk.screen svg { width: 20px; height: 20px; }
+
+/* ---------- voice (mic button + answer card) ---------- */
+.mic-fab { position: fixed; z-index: 6; inset-inline-end: 16px; bottom: calc(84px + env(safe-area-inset-bottom));
+  width: 58px; height: 58px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center;
+  background: var(--ink); color: var(--bg); box-shadow: 0 4px 16px rgba(31, 42, 55, .25); transition: transform .1s, background .2s; }
+.mic-fab svg { width: 28px; height: 28px; fill: currentColor; }
+.mic-fab:active { transform: scale(.94); }
+.mic-fab.rec { background: var(--warn); color: #fff; animation: micpulse 1.2s ease-in-out infinite; }
+.mic-fab.busy { opacity: .6; pointer-events: none; }
+@keyframes micpulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warn) 55%, transparent); } 50% { box-shadow: 0 0 0 14px transparent; } }
+.voice-card { position: fixed; z-index: 7; inset-inline: 16px; margin-inline: auto; max-width: 440px; bottom: calc(154px + env(safe-area-inset-bottom));
+  background: var(--card); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow), 0 8px 28px rgba(31, 42, 55, .12); padding: 14px 16px 14px 44px; }
+.voice-card p { margin: 0; }
+.voice-card .v-status { color: var(--muted); display: flex; align-items: center; gap: 8px; font-size: 15px; }
+.voice-card .v-heard { color: var(--muted); font-size: 14px; margin-bottom: 6px; }
+.voice-card .v-reply { font-size: 17px; font-weight: 500; line-height: 1.4; }
+.voice-card .v-actions { display: flex; gap: 8px; margin-top: 12px; }
+.voice-card .v-x { position: absolute; top: 8px; inset-inline-end: 8px; width: 30px; height: 30px; border: 0; border-radius: 50%; background: var(--bg); color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.v-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warn); animation: micblink 1s infinite; }
+@keyframes micblink { 50% { opacity: .25; } }
+.spinner.sm { width: 16px; height: 16px; border-width: 2px; }
+body.tablet .mic-fab { bottom: 24px; width: 76px; height: 76px; }
+body.tablet .mic-fab svg { width: 36px; height: 36px; }
+body.tablet .voice-card { bottom: 116px; max-width: 560px; }
+body.tablet .voice-card .v-reply { font-size: 22px; }
+@media (min-width: 1000px) {
+  .mic-fab { bottom: 24px; }
+  .voice-card { bottom: 96px; }
+}

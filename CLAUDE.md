@@ -34,3 +34,8 @@ Family smart-home web app over Doron's Home Assistant. Separate from family-app 
 - Voice notes (`type: audio`): media fetched via Graph `/{media_id}` → url (both with WA_TOKEN), ≤1.5MB, transcribed by the same Gemini model (EMPTY → ask to repeat), then handled like text; replies start with `🎤 "<transcript>"`. Only known members' audio is downloaded.
 - Unlock needs "כן" within 3 min (`wa_chats/{phone}.pending`). Short history (6 turns, 10 min) in `wa_chats`. Dedup by message id in `wa_msgs`.
 - Meta app "OurHome" (published; privacy page public/privacy.html), test number +1 555 177-2553, WABA id 2095741247730179 subscribed via POST /{waba}/subscribed_apps (without it Meta delivers nothing). Test numbers can't start a chat: Meta sends a template first, then users reply. ≤5 verified recipients. Runtime SA needs `roles/aiplatform.user`.
+
+## Voice in the app
+- Mic button (`#micBtn`, bottom corner; larger on the tablet) → MediaRecorder (webm/opus on Chrome/Android, mp4 on iOS), auto-stops after 1.6s of silence or 15s, mic released right away. Base64 audio → callable `voice` (in `functions/whatsapp.js`, same Gemini brain and tools as WhatsApp via shared `converse()`/`speechToText()`; history in `app_chats/{email}`, prompt channel `app` = no emoji, short).
+- Returns `{heard, reply, pending, acted}`; the card (`#voice`) shows transcript + reply, reads the reply aloud with the browser's he-IL speechSynthesis, and shows a "כן, לפתוח" button for a pending unlock (sends `{text:'כן'}`). Refreshes states when something ran.
+- Needs HTTPS + mic permission; hidden where MediaRecorder is missing.

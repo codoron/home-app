@@ -10,6 +10,7 @@ const db = getFirestore(app);
 const fns = getFunctions(app, 'europe-west1');
 const haStates = httpsCallable(fns, 'haStates', { timeout: 25000 });
 const haCall = httpsCallable(fns, 'haCall', { timeout: 30000 });
+const voiceFn = httpsCallable(fns, 'voice', { timeout: 70000 });
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -399,6 +400,7 @@ function render() {
   if (isTablet()) { tickClock(); keepAwake(); }
   $('#status').className = 'status' + (S.ok ? '' : ' bad');
   $('#status').innerHTML = `<span class="dot"></span>${S.ok ? 'מחובר לבית' : 'אין חיבור לבית'}`;
+  renderVoice();
 }
 
 
@@ -1074,6 +1076,123 @@ $('#loginBtn').addEventListener('click', async () => {
     if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/cancelled-popup-request'].includes(e.code)) return signInWithRedirect(auth, p);
     if (e.code !== 'auth/popup-closed-by-user') { $('#loginErr').textContent = 'הכניסה נכשלה: ' + e.code; $('#loginErr').hidden = false; }
   }
+});
+
+/* ---------- voice: tap the mic, speak, the house answers (same brain as the WhatsApp bot) ---------- */
+const V = { state: 'idle', rec: null, stream: null, chunks: [], timer: null, heard: '', reply: '', pending: false, err: '' };
+const V_MAX_MS = 15000, V_SILENCE_MS = 1600;
+const vMime = () => ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm']
+  .find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+const voiceOk = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+
+function renderVoice() {
+  const btn = $('#micBtn'), el = $('#voice');
+  btn.hidden = !voiceOk() || !S.data;
+  btn.classList.toggle('rec', V.state === 'rec');
+  btn.classList.toggle('busy', V.state === 'think');
+  if (V.state === 'idle' && !V.reply && !V.err) { el.hidden = true; return; }
+  const status = { rec: '<span class="v-dot"></span>מקשיב… דברו, ולחצו שוב לסיום', think: '<span class="spinner sm"></span>רגע, בודק…' }[V.state] || '';
+  el.innerHTML = `<button class="v-x" data-vclose aria-label="סגירה">×</button>
+    ${status ? `<p class="v-status">${status}</p>` : ''}
+    ${V.heard ? `<p class="v-heard">🎤 "${esc(V.heard)}"</p>` : ''}
+    ${V.reply ? `<p class="v-reply">${esc(V.reply)}</p>` : ''}
+    ${V.err ? `<p class="v-reply err">${esc(V.err)}</p>` : ''}
+    ${V.pending && V.state === 'idle' ? `<div class="v-actions"><button class="btn primary" data-vyes>כן, לפתוח</button><button class="btn" data-vclose>ביטול</button></div>` : ''}`;
+  el.hidden = false;
+}
+function closeVoice() {
+  if (V.state === 'rec') stopRec(true);
+  Object.assign(V, { heard: '', reply: '', err: '', pending: false });
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  renderVoice();
+}
+
+function speak(text) {
+  if (!window.speechSynthesis || !text) return;
+  const clean = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '').trim();
+  if (!clean) return;
+  const u = new SpeechSynthesisUtterance(clean);
+  u.lang = 'he-IL';
+  const he = speechSynthesis.getVoices().find((x) => /^he|^iw/i.test(x.lang));
+  if (he) u.voice = he;
+  speechSynthesis.cancel(); speechSynthesis.speak(u);
+}
+
+async function startRec() {
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  Object.assign(V, { heard: '', reply: '', err: '', pending: false, chunks: [] });
+  try {
+    V.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (e) {
+    V.err = e.name === 'NotAllowedError' ? 'צריך לאשר גישה למיקרופון בהגדרות הדפדפן' : 'אין גישה למיקרופון';
+    renderVoice(); return;
+  }
+  const mime = vMime();
+  V.rec = new MediaRecorder(V.stream, { ...(mime ? { mimeType: mime } : {}), audioBitsPerSecond: 32000 });
+  V.rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) V.chunks.push(ev.data); };
+  V.rec.onstop = () => sendRec();
+  V.rec.start(250);
+  V.state = 'rec'; V.startedAt = Date.now();
+  renderVoice();
+  // stop by itself after a pause in speech (handy on the tablet), or at the time limit
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const an = ctx.createAnalyser(); an.fftSize = 1024;
+    ctx.createMediaStreamSource(V.stream).connect(an);
+    const buf = new Float32Array(an.fftSize);
+    let spoke = false, quietSince = Date.now();
+    V.ctx = ctx;
+    V.timer = setInterval(() => {
+      an.getFloatTimeDomainData(buf);
+      let sum = 0; for (const x of buf) sum += x * x;
+      const loud = Math.sqrt(sum / buf.length) > 0.02;
+      if (loud) { spoke = true; quietSince = Date.now(); }
+      if ((spoke && Date.now() - quietSince > V_SILENCE_MS) || Date.now() - V.startedAt > V_MAX_MS) stopRec();
+    }, 100);
+  } catch { V.timer = setTimeout(() => stopRec(), V_MAX_MS); }
+}
+function stopRec(cancel) {
+  clearInterval(V.timer); clearTimeout(V.timer); V.timer = null;
+  if (V.ctx) { V.ctx.close().catch(() => {}); V.ctx = null; }
+  V.cancel = !!cancel;
+  if (V.rec && V.rec.state !== 'inactive') V.rec.stop();
+  // release the mic right away (the tablet must not keep it open)
+  if (V.stream) { V.stream.getTracks().forEach((t) => t.stop()); V.stream = null; }
+  if (cancel) { V.state = 'idle'; renderVoice(); }
+}
+async function sendRec() {
+  if (V.cancel) { V.cancel = false; return; }
+  const type = (V.rec && V.rec.mimeType) || vMime() || 'audio/webm';
+  const blob = new Blob(V.chunks, { type });
+  V.rec = null; V.chunks = [];
+  if (Date.now() - V.startedAt < 700 || blob.size < 1500) { V.state = 'idle'; V.err = 'לא שמעתי כלום 🎤 לחצו ודברו'; renderVoice(); return; }
+  const audio = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.readAsDataURL(blob); });
+  await askHouse({ audio, mime: type.split(';')[0] });
+}
+async function askHouse(data) {
+  V.state = 'think'; renderVoice();
+  try {
+    const r = (await voiceFn(data)).data;
+    if (r.error) V.err = r.error;
+    else {
+      V.heard = r.heard || V.heard; V.reply = r.reply || '✅'; V.pending = !!r.pending;
+      speak(V.reply);
+    }
+    if (r.acted || r.done) setTimeout(load, 1500);
+  } catch (e) {
+    V.err = /deadline|timeout/i.test((e.code || '') + e.message) ? 'הבית לא ענה בזמן. נסו שוב.' : (e.message || 'משהו השתבש');
+  }
+  V.state = 'idle'; renderVoice();
+}
+$('#micBtn').addEventListener('click', () => {
+  if (V.state === 'rec') stopRec();
+  else if (V.state === 'idle') startRec();
+});
+$('#voice').addEventListener('click', (ev) => {
+  const t = ev.target.closest('button');
+  if (!t) return;
+  if ('vclose' in t.dataset) closeVoice();
+  if ('vyes' in t.dataset) { V.pending = false; askHouse({ text: 'כן' }); }
 });
 
 /* ---------- boot ---------- */
