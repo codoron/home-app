@@ -399,7 +399,7 @@ function render() {
   if (mineLabel) mineLabel.textContent = isTablet() ? 'מועדפים' : 'שלי';
   if (isTablet()) { tickClock(); keepAwake(); }
   $('#status').className = 'status' + (S.ok ? '' : ' bad');
-  $('#status').innerHTML = `<span class="dot"></span>${S.ok ? 'מחובר לבית' : 'אין חיבור לבית'}`;
+  $('#status').innerHTML = `<span class="dot${S.stale ? ' stale' : ''}"></span>${S.stale ? 'מתעדכן…' : S.ok ? 'מחובר לבית' : 'אין חיבור לבית'}`;
   renderVoice();
 }
 
@@ -856,6 +856,17 @@ function remoteClick(t, ev) {
 }
 
 /* ---------- data ---------- */
+// The last house state is kept on the device, so the app opens instantly and refreshes in the background.
+const CACHE_V = 1;
+const cacheKey = (email) => 'house:' + CACHE_V + ':' + (email || '').toLowerCase();
+function readCache(email) {
+  try {
+    const c = JSON.parse(localStorage.getItem(cacheKey(email)) || 'null');
+    return c && c.data && c.data.me && Date.now() - c.at < 7 * 864e5 ? c.data : null;
+  } catch { return null; }
+}
+function writeCache(email, data) { try { localStorage.setItem(cacheKey(email), JSON.stringify({ at: Date.now(), data })); } catch {} }
+function clearCaches() { try { for (const k of Object.keys(localStorage)) if (k.startsWith('house:')) localStorage.removeItem(k); } catch {} }
 let loading = false;
 async function load() {
   if (loading || !S.user) return;
@@ -863,7 +874,8 @@ async function load() {
   try {
     const r = await haStates();
     if (S.data && Date.now() - (S.layoutAt || 0) < 15000) { r.data.me.layout = S.data.me.layout; r.data.me.favorites = S.data.me.favorites; }
-    S.data = r.data; S.ok = true;
+    S.data = r.data; S.ok = true; S.stale = false;
+    writeCache(S.user.email, r.data);
     // first screen: parents land on the house, children on their own screen
     if (!S.tab || S.data.me.role === 'tablet') S.tab = S.data.me.role === 'child' ? 'mine' : 'rooms';
     if (!S.unsubMembers) watchMembers();
@@ -873,9 +885,10 @@ async function load() {
     if (!S.edit && !(a && ['INPUT', 'SELECT'].includes(a.tagName) && $('#view').contains(a))) render();
   } catch (e) {
     if (/not-member/.test(e.message || '')) {
+      clearCaches(); S.data = null; S.stale = false;
       $('#deniedEmail').textContent = S.user.email; show('denied');
     } else {
-      S.ok = false;
+      S.ok = false; S.stale = false;
       const msg = /deadline|timeout/i.test((e.code || '') + e.message) ? 'הבית לא עונה כרגע. מנסים שוב אוטומטית…' : esc(e.message || '');
       if (!S.data) setTimeout(load, 10000);
       if (S.data) render(); else { show('main'); $('#view').innerHTML = `<div class="hint" style="margin-top:24px">לא הצלחנו להתחבר לבית. ${msg}<br><button class="btn small" data-retry style="margin-top:10px">לנסות שוב</button></div>`; }
@@ -1015,7 +1028,7 @@ document.addEventListener('click', async (ev) => {
     $('#pickHead').scrollIntoView({ behavior: 'smooth' });
     return;
   }
-  if ('signout' in ds) { await signOut(auth); return; }
+  if ('signout' in ds) { clearCaches(); await signOut(auth); return; }
   if ('retry' in ds) return load();
   if (ds.wa || ds.mail) {
     const m = S.members.find((x) => x.id === (ds.wa || ds.mail));
@@ -1151,7 +1164,15 @@ function speak(text) {
   speechSynthesis.cancel(); speechSynthesis.speak(u);
 }
 
+// wake the voice function (and its HA data) while the user is still talking or typing
+let lastWarm = 0;
+function warmVoice() {
+  if (Date.now() - lastWarm < 4 * 60 * 1000) return;
+  lastWarm = Date.now();
+  voiceFn({ ping: 1 }).catch(() => {});
+}
 async function startRec() {
+  warmVoice();
   if (window.speechSynthesis) speechSynthesis.cancel();
   Object.assign(V, { open: true, heard: '', reply: '', err: '', pending: false, typed: false, chunks: [] });
   if (!voiceOk()) { renderVoice(); return; }   // no recorder here: the card opens for typing only
@@ -1224,7 +1245,7 @@ $('#micBtn').addEventListener('click', () => {
   else if (V.state === 'idle') startRec();
 });
 // typing: touching the text line stops the recording; Enter / the arrow sends
-$('#voiceText').addEventListener('focus', () => { clearTimeout(vAutoClose); if (V.state === 'rec') stopRec(true); });
+$('#voiceText').addEventListener('focus', () => { warmVoice(); clearTimeout(vAutoClose); if (V.state === 'rec') stopRec(true); });
 $('#voiceText').addEventListener('input', (ev) => { clearTimeout(vAutoClose); $('.v-send').disabled = !ev.target.value.trim(); });
 $('#voiceForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
@@ -1264,7 +1285,13 @@ onAuthStateChanged(auth, (u) => {
   S.user = u; S.data = null;
   if (S.unsubMembers) { S.unsubMembers(); S.unsubMembers = null; }
   if (!u) { show('login'); return; }
-  show('loading');
+  // draw the house from the device right away; fresh data replaces it in a moment
+  const cached = readCache(u.email);
+  if (cached) {
+    S.data = cached; S.ok = true; S.stale = true;
+    if (!S.tab || cached.me.role === 'tablet') S.tab = cached.me.role === 'child' ? 'mine' : 'rooms';
+    show('main'); render();
+  } else show('loading');
   load();
 });
 

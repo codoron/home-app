@@ -67,7 +67,7 @@ async function ha(path, opts = {}) {
 const TPL = "{% set ns = namespace(a=[]) %}{% for a in areas() %}{% set ns.a = ns.a + [{'id': a, 'name': area_name(a), 'entities': area_entities(a)}] %}{% endfor %}{{ ns.a | tojson }}";
 let areaCache = null, areaAt = 0;
 async function getAreas() {
-  if (areaCache && Date.now() - areaAt < 60 * 1000) return areaCache;
+  if (areaCache && Date.now() - areaAt < 5 * 60 * 1000) return areaCache;
   let res = await ha('/api/template', { method: 'POST', body: JSON.stringify({ template: TPL }) });
   if (typeof res === 'string') res = JSON.parse(res);
   areaCache = res; areaAt = Date.now();
@@ -120,8 +120,10 @@ async function getCfg() {
   return cfgCache;
 }
 
-async function view(m) {
-  const [areas, states, cfg] = await Promise.all([getAreas(), ha('/api/states'), getCfg()]);
+// what view() needs from HA and Firestore; started early (in parallel with the member lookup) by the callers
+const fetchHouse = () => Promise.all([getAreas(), ha('/api/states'), getCfg()]);
+async function view(m, pre) {
+  const [areas, states, cfg] = await (pre || fetchHouse());
   // the shared living-room tablet controls the whole house, like a parent
   const parent = m.role === 'parent' || m.role === 'tablet';
   const byId = {};
@@ -198,8 +200,14 @@ async function view(m) {
 }
 
 exports.haStates = onCall(SECRETS, async (req) => {
+  const t0 = Date.now();
+  // HA and Firestore in parallel with the member lookup (signed-in callers only)
+  const pre = req.auth ? fetchHouse() : null;
+  if (pre) pre.catch(() => {});
+  const runP = db.doc('config/runs').get();
   const m = await getMember(req);
-  const [v, runSnap] = await Promise.all([view(m), db.doc('config/runs').get()]);
+  const [v, runSnap] = await Promise.all([view(m, pre), runP]);
+  if (Date.now() - t0 > 2500) console.log('haStates slow', Date.now() - t0, 'ms');
   const runs = {};
   for (const [k, r] of Object.entries(runSnap.exists ? runSnap.data() : {})) {
     const id = k.replace(/__/, '.');
@@ -258,7 +266,7 @@ exports.haCall = onCall(SECRETS, async (req) => {
   return { ok: true };
 });
 
-const bot = require('./whatsapp')({ ha, view, runCalls, db, dom, objId, getMember, SERVICES, HA_URL, HA_TOKEN });
+const bot = require('./whatsapp')({ ha, view, fetchHouse, getCfg, runCalls, db, dom, objId, getMember, SERVICES, HA_URL, HA_TOKEN });
 exports.whatsapp = bot.whatsapp;
 exports.voice = bot.voice;   // voice commands from the app (same Gemini brain as WhatsApp)
 

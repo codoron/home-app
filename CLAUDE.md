@@ -24,6 +24,11 @@ Family smart-home web app over Doron's Home Assistant. Separate from family-app 
 - Personal arrangement: "סידור" toggles `S.edit`; SortableJS 1.15.2 (bundled in public/vendor, drag only by the .drag-h grip added in edit mode so the page still scrolls, `forceFallback` + `direction: 'vertical'` because its horizontal mode misreads RTL). Saved per member in `members/{email}.layout` {rooms, 'r:<room>', 'g:<groupId>'}; favorites order = the favorites array. New items go last; polling doesn't redraw while arranging.
 - Hebrew area names: `AREA_NAMES` in `public/config.js`, keyed by HA area name.
 
+## Performance
+- Client: last `haStates` result cached in localStorage (`house:1:<email>`, ≤7 days, cleared on sign-out / not-member); on open the house is drawn from it at once (`S.stale` → status "מתעדכן…") and refreshed in the background. index.html modulepreloads app.js/config.js/Firebase modules (keep its `?v=` in step with the script tag), loads the font non-blocking, Sortable deferred.
+- Server: `fetchHouse()` (areas + states + config) starts in parallel with `getMember`; `view(m, pre)` takes it. Areas cached 5 min, config 60 s per instance.
+- Voice: `voice({ping:1})` warms the function + HA data when the mic opens or the text line is focused (≤ every 4 min). Chat doc and house data load in parallel with the transcript. Gemini via `gen(req, level)`: thinkingLevel MINIMAL for transcripts, LOW for conversation; falls back to the model default if rejected. Logs `voice timing {stt, converse, total}`; `haStates slow` when > 2.5 s.
+
 ## Testing locally
 `node --check` the JS; render with Playwright, routing gstatic firebase imports to small mock modules.
 

@@ -422,3 +422,6 @@ body.tablet .v-msg.me { font-size: 18px; }
   .mic-fab { bottom: 24px; }
   .voice-card { bottom: max(100px, calc(var(--kb, 0px) + 12px)); }
 }
+
+/* status dot while the cached house is being refreshed */
+.dot.stale { background: var(--muted) !important; animation: micblink 1s infinite; }

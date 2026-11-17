@@ -26,7 +26,7 @@ const normPhone = (p) => {
   return d;
 };
 
-module.exports = ({ ha, view, runCalls, db, dom, objId, getMember, HA_URL, HA_TOKEN }) => {
+module.exports = ({ ha, view, fetchHouse, getCfg, runCalls, db, dom, objId, getMember, HA_URL, HA_TOKEN }) => {
   let genai = null;
   async function gemini() {
     if (!genai) {
@@ -34,6 +34,21 @@ module.exports = ({ ha, view, runCalls, db, dom, objId, getMember, HA_URL, HA_TO
       genai = new GoogleGenAI({ vertexai: true, project: process.env.GCLOUD_PROJECT || 'home-app-f94e4', location: 'global' });
     }
     return genai;
+  }
+  // Gemini with a short thinking budget (much faster for transcripts and simple home commands).
+  // If the model rejects the setting, fall back to its default once and remember it.
+  let thinkOk = true;
+  async function gen(req, level) {
+    const ai = await gemini();
+    if (thinkOk && level) {
+      try { return await ai.models.generateContent({ ...req, config: { ...req.config, thinkingConfig: { thinkingLevel: level } } }); }
+      catch (e) {
+        if (!/think/i.test(e.message || '')) throw e;
+        console.warn('thinkingLevel not supported, using the model default:', (e.message || '').slice(0, 160));
+        thinkOk = false;
+      }
+    }
+    return ai.models.generateContent(req);
   }
 
   async function send(phoneId, to, text) {
@@ -128,16 +143,16 @@ module.exports = ({ ha, view, runCalls, db, dom, objId, getMember, HA_URL, HA_TO
       return real.find((x) => areaOf[x.id] && areaOf[x.id].id === m.room) ||
         real.find((x) => areaOf[x.id] && /living|סלון/i.test(areaOf[x.id].id + ' ' + areaOf[x.id].name)) || speakers[0];
     };
-    const all = await view({ role: 'parent' });
+    let allP = null;
+    const all = () => (allP = allP || view({ role: 'parent' }));   // the whole house, only if needed
     let sp = a.speaker && v.entities[a.speaker];
     if (a.speaker && !isSpeaker(sp)) throw new HttpsError('invalid-argument', 'not a speaker this user may use: ' + a.speaker);
     // the house reminder speaker can be pinned in config/app.reminderSpeaker (a media_player id)
-    const cfgSnap = await db.doc('config/app').get();
-    const pinned = cfgSnap.exists && cfgSnap.data().reminderSpeaker;
-    if (!sp && pinned && all.entities[pinned]) sp = all.entities[pinned];
+    const pinned = (await getCfg()).reminderSpeaker;
+    if (!sp && pinned) sp = v.entities[pinned] || (await all()).entities[pinned];
     if (!sp) sp = pickIn(v, Object.values(v.entities).filter(isSpeaker));
     // a reminder only speaks, so anyone may use the house speaker (e.g. the living-room Google Home), even outside their rooms
-    if (!sp || rank(sp) === 2) sp = pickIn(all, Object.values(all.entities).filter(isSpeaker)) || sp;
+    if (!sp || rank(sp) === 2) { const h = await all(); sp = pickIn(h, Object.values(h.entities).filter(isSpeaker)) || sp; }
     if (!sp) throw new HttpsError('failed-precondition', 'no Google speaker available to this user');
     const open = await db.collection('reminders').where('email', '==', m.email).where('status', '==', 'pending').get();
     if (open.size >= 20) throw new HttpsError('resource-exhausted', 'too many pending reminders (20)');
@@ -255,17 +270,15 @@ ${deviceList(v, cfg)}`;
   const MAX_AUDIO = 1.5 * 1024 * 1024;   // ~a minute or more of WhatsApp opus
   // audio bytes → text, with the same Gemini model. { text } or { error } (a Hebrew message for the user)
   async function speechToText(buf, mime, tag) {
-    const cfgSnap = await db.doc('config/app').get();
-    const model = (cfgSnap.exists && cfgSnap.data().geminiModel) || MODEL_DEFAULT;
-    const ai = await gemini();
-    const res = await ai.models.generateContent({
+    const model = (await getCfg()).geminiModel || MODEL_DEFAULT;
+    const res = await gen({
       model,
       contents: [{ role: 'user', parts: [
         { inlineData: { mimeType: String(mime || 'audio/ogg').split(';')[0], data: Buffer.from(buf).toString('base64') } },
         { text: 'Transcribe this voice message exactly, in the language spoken (usually Hebrew). It is a request to a smart home. Output only the transcript, no quotes or notes. If there is no intelligible speech, output exactly: EMPTY' },
       ] }],
       config: { temperature: 0 },
-    });
+    }, 'MINIMAL');
     const t = (res.text || '').trim().replace(/^["“”]+|["“”]+$/g, '');
     console.log(tag, 'voice', buf.byteLength, 'bytes →', t.slice(0, 80));
     if (!t || t === 'EMPTY') return { error: 'לא הצלחתי להבין את ההקלטה 🎤 אפשר לחזור על זה, או לכתוב?' };
@@ -305,14 +318,15 @@ ${deviceList(v, cfg)}`;
   }
 
   // One turn of conversation: a pending unlock, short history, Gemini with tools. Returns { reply, pending }.
-  async function converse(m, text, chatRef, channel) {
-    const chatSnap = await chatRef.get();
+  // pre: { chat, house } promises started earlier by the caller (saves a round trip each)
+  async function converse(m, text, chatRef, channel, pre = {}) {
+    const chatSnap = await (pre.chat || chatRef.get());
     const chat = chatSnap.exists ? chatSnap.data() : {};
     const fresh = chat.at && Date.now() - chat.at < 10 * 60 * 1000;
     const history = fresh ? (chat.turns || []).slice(-6) : [];
 
     let v;
-    try { v = await view(m); } catch { return { reply: 'הבית לא עונה כרגע 😕 נסו שוב עוד מעט.' }; }
+    try { v = await view(m, pre.house); } catch { return { reply: 'הבית לא עונה כרגע 😕 נסו שוב עוד מעט.' }; }
 
     // a pending door unlock waits for "כן"
     if (chat.pending && Date.now() - chat.pending.at < 3 * 60 * 1000) {
@@ -323,9 +337,7 @@ ${deviceList(v, cfg)}`;
       }
     }
 
-    const cfgSnap = await db.doc('config/app').get();
-    const cfg = cfgSnap.exists ? cfgSnap.data() : {};
-    const ai = await gemini();
+    const cfg = await getCfg();
     const model = cfg.geminiModel || MODEL_DEFAULT;
     const contents = [
       ...history.map((t) => ({ role: t.r === 'u' ? 'user' : 'model', parts: [{ text: t.t }] })),
@@ -336,10 +348,10 @@ ${deviceList(v, cfg)}`;
     const woke = new Map();   // TVs turned on during this message
     let acted = false;
     for (let round = 0; round < 4; round++) {
-      const res = await ai.models.generateContent({
+      const res = await gen({
         model, contents,
         config: { systemInstruction: systemPrompt(m, v, cfg, channel), tools: toolsFor(channel), temperature: 0.2 },
-      });
+      }, 'LOW');
       const calls = res.functionCalls || [];
       if (!calls.length) { reply = (res.text || '').trim(); break; }
       contents.push(res.candidates[0].content);   // keeps Gemini's thought signatures
@@ -433,7 +445,13 @@ ${deviceList(v, cfg)}`;
   // data: { audio: base64, mime } or { text } (e.g. "כן" from the confirm button). Returns { heard, reply, pending, acted } or { error }.
   const AUDIO_TYPES = /^audio\/(webm|ogg|mp4|mpeg|aac|wav|x-m4a|m4a)$/;
   const voice = onCall({ secrets: [HA_URL, HA_TOKEN], timeoutSeconds: 60, memory: '512MiB' }, async (req) => {
+    const t0 = Date.now(), ms = {};
+    const house = req.auth ? fetchHouse() : null;   // HA states/areas while we work on the audio
+    if (house) house.catch(() => {});
     const m = await getMember(req);
+    if ((req.data || {}).ping) { if (house) await house.catch(() => {}); return { ok: true }; }   // warm-up only
+    const chatRef = db.doc('app_chats/' + m.email);
+    const chat = chatRef.get();
     const d = req.data || {};
     let text = '', heard = '';
     if (d.audio) {
@@ -442,14 +460,19 @@ ${deviceList(v, cfg)}`;
       const buf = Buffer.from(String(d.audio), 'base64');
       if (buf.byteLength < 1500) return { error: 'ההקלטה קצרה מדי 🎤' };
       if (buf.byteLength > MAX_AUDIO) return { error: 'ההקלטה ארוכה מדי. נסו משפט קצר.' };
+      const ts = Date.now();
       const r = await speechToText(buf, mime, 'app ' + m.email.split('@')[0]);
+      ms.stt = Date.now() - ts;
       if (r.error) return { error: r.error };
       text = heard = r.text;
     } else {
       text = String(d.text || '').trim().slice(0, 1000);
       if (!text) throw new HttpsError('invalid-argument', 'אין מה לשלוח');
     }
-    const r = await converse(m, text, db.doc('app_chats/' + m.email), 'app');
+    const tc = Date.now();
+    const r = await converse(m, text, chatRef, 'app', { chat, house });
+    ms.converse = Date.now() - tc; ms.total = Date.now() - t0;
+    console.log('voice timing', JSON.stringify(ms));
     return { heard, ...r };
   });
 
