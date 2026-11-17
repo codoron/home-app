@@ -118,16 +118,26 @@ module.exports = ({ ha, view, runCalls, db, dom, objId, getMember, HA_URL, HA_TO
     if (a.at) at = nextAt(a.at);
     else if (a.minutes != null) { const n = Number(a.minutes); if (n >= 1 && n <= 24 * 60) at = Date.now() + Math.round(n) * 60000; }
     if (!at) throw new HttpsError('invalid-argument', 'time must be 1 minute to 24 hours ahead (minutes or HH:MM)');
-    const pickIn = (vv, speakers) => {
+    // a real Google Home / Nest first; soundbars and TVs (which also show up as Cast speakers) last
+    const rank = (x) => { const n = x.name + ' ' + x.id;
+      return /sound ?bar|סאונד ?בר|\blg\b|tv|טלוויזיה|bravia|samsung/i.test(n) ? 2 : /google|גוגל|nest|home ?mini|\bhome\b/i.test(n) ? 0 : 1; };
+    const pickIn = (vv, list) => {
+      const speakers = [...list].sort((x, y) => rank(x) - rank(y));
       const areaOf = {}; for (const ar of vv.areas) for (const e of ar.entities) areaOf[e] = ar;
-      return speakers.find((x) => areaOf[x.id] && areaOf[x.id].id === m.room) ||
-        speakers.find((x) => areaOf[x.id] && /living|סלון/i.test(areaOf[x.id].id + ' ' + areaOf[x.id].name)) || speakers[0];
+      const real = speakers.filter((x) => rank(x) < 2);
+      return real.find((x) => areaOf[x.id] && areaOf[x.id].id === m.room) ||
+        real.find((x) => areaOf[x.id] && /living|סלון/i.test(areaOf[x.id].id + ' ' + areaOf[x.id].name)) || speakers[0];
     };
+    const all = await view({ role: 'parent' });
     let sp = a.speaker && v.entities[a.speaker];
     if (a.speaker && !isSpeaker(sp)) throw new HttpsError('invalid-argument', 'not a speaker this user may use: ' + a.speaker);
+    // the house reminder speaker can be pinned in config/app.reminderSpeaker (a media_player id)
+    const cfgSnap = await db.doc('config/app').get();
+    const pinned = cfgSnap.exists && cfgSnap.data().reminderSpeaker;
+    if (!sp && pinned && all.entities[pinned]) sp = all.entities[pinned];
     if (!sp) sp = pickIn(v, Object.values(v.entities).filter(isSpeaker));
     // a reminder only speaks, so anyone may use the house speaker (e.g. the living-room Google Home), even outside their rooms
-    if (!sp) { const all = await view({ role: 'parent' }); sp = pickIn(all, Object.values(all.entities).filter(isSpeaker)); }
+    if (!sp || rank(sp) === 2) sp = pickIn(all, Object.values(all.entities).filter(isSpeaker)) || sp;
     if (!sp) throw new HttpsError('failed-precondition', 'no Google speaker available to this user');
     const open = await db.collection('reminders').where('email', '==', m.email).where('status', '==', 'pending').get();
     if (open.size >= 20) throw new HttpsError('resource-exhausted', 'too many pending reminders (20)');
@@ -164,7 +174,7 @@ module.exports = ({ ha, view, runCalls, db, dom, objId, getMember, HA_URL, HA_TO
       const e = v.entities[id];
       let st = e.state;
       if (e.unit_of_measurement) st += e.unit_of_measurement;
-      const extra = e.remote ? ' (TV box: use tv_channel for channels)' : isSpeaker(e) ? ' (Google speaker: can play reminders)' : '';
+      const extra = e.remote ? ' (TV box: use tv_channel for channels)' : isSpeaker(e) && !/sound ?bar|\blg\b/i.test(e.name + ' ' + e.id) ? ' (Google speaker: can play reminders)' : '';
       return `- ${id} | ${e.name} | ${st}${extra}`;
     };
     const skip = new Set();
