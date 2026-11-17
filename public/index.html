@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=17">
+  <link rel="stylesheet" href="style.css?v=18">
 </head>
 <body>
   <div id="app">
@@ -51,13 +51,19 @@
       </nav>
       <button id="micBtn" class="mic-fab" hidden aria-label="פקודה קולית" title="פקודה קולית"><svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM5 11h2a5 5 0 0 0 10 0h2a7 7 0 0 1-6 6.9V21h-2v-3.1A7 7 0 0 1 5 11z"/></svg></button>
       <div id="voiceBg" class="voice-bg" hidden></div>
-      <div id="voice" class="voice-card" hidden aria-live="polite"></div>
+      <div id="voice" class="voice-card" hidden>
+        <div id="voiceMain" aria-live="polite"></div>
+        <form id="voiceForm" class="v-form" autocomplete="off">
+          <input id="voiceText" type="text" maxlength="300" placeholder="או הקלידו בקשה…" enterkeyhint="send" aria-label="בקשה בכתב">
+          <button type="submit" class="v-send" aria-label="שליחה" disabled><svg viewBox="0 0 24 24"><path d="M3 20.5 21 12 3 3.5v6.6l11 1.9-11 1.9z"/></svg></button>
+        </form>
+      </div>
     </section>
 
     <div id="loading" class="screen center"><div class="spinner"></div></div>
   </div>
   <div id="toast" hidden></div>
   <script src="vendor/Sortable.min.js"></script>
-  <script type="module" src="app.js?v=21"></script>
+  <script type="module" src="app.js?v=22"></script>
 </body>
 </html>

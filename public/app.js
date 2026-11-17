@@ -1089,39 +1089,53 @@ const MIC_SVG = '<svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0
 let vAutoClose = null;
 function renderVoice() {
   const btn = $('#micBtn'), el = $('#voice'), bg = $('#voiceBg');
-  btn.hidden = !voiceOk() || !S.data;
+  btn.hidden = !S.data;
   btn.classList.toggle('rec', V.state === 'rec');
   btn.classList.toggle('busy', V.state === 'think');
   btn.setAttribute('aria-label', V.state === 'rec' ? 'סיום הקלטה' : 'פקודה קולית');
-  clearTimeout(vAutoClose);
-  if (V.state === 'idle' && !V.reply && !V.err) { el.hidden = true; bg.hidden = true; el.className = 'voice-card'; return; }
-  const kind = V.state === 'rec' ? 'rec' : V.state === 'think' ? 'think' : V.err ? 'err' : V.pending ? 'ask' : 'ok';
+  const inp = $('#voiceText');
+  if (!V.open) { clearTimeout(vAutoClose); el.hidden = true; bg.hidden = true; el.className = 'voice-card'; return; }
+  const kind = V.state === 'rec' ? 'rec' : V.state === 'think' ? 'think' : V.err ? 'err' : V.pending ? 'ask' : V.reply ? 'ok' : 'type';
+  // the poll redraws often; nothing changed → leave the card (and whatever is being typed) alone
+  const sig = [kind, V.heard, V.reply, V.err, V.typed].join('|');
+  if (sig === V.sig && !el.hidden) return;
+  V.sig = sig; clearTimeout(vAutoClose);
+  inp.disabled = kind === 'think';
+  inp.placeholder = kind === 'rec' ? 'או הקלידו בקשה…' : 'הקלידו בקשה…';
   const head = {
+    type: ['מה לעשות?', voiceOk() ? 'הקלידו בקשה, או לחצו על המיקרופון' : 'הקלידו בקשה לבית'],
     rec: ['מקשיב…', 'דברו עכשיו. לחיצה על המיקרופון מסיימת'],
     think: ['רגע, בודק…', 'מעביר את הבקשה לבית'],
     ok: ['הבית', ''],
     ask: ['צריך אישור', ''],
     err: ['לא הסתדר', ''],
   }[kind];
-  const icon = { rec: MIC_SVG, think: '<span class="v-spin"></span>', ok: svg('home'), ask: svg('lock'), err: '!' }[kind];
+  const icon = { type: svg('home'), rec: MIC_SVG, think: '<span class="v-spin"></span>', ok: svg('home'), ask: svg('lock'), err: '!' }[kind];
   let body = '';
   if (kind === 'rec') body = `<div class="v-wave">${'<i></i>'.repeat(7)}</div>`;
   if (kind === 'think') body = `<div class="v-dots"><i></i><i></i><i></i></div>`;
-  if (V.heard && kind !== 'rec') body += `<div class="v-msg me"><small>אמרת</small>${esc(V.heard)}</div>`;
+  if (V.heard && kind !== 'rec') body += `<div class="v-msg me"><small>${V.typed ? 'כתבת' : 'אמרת'}</small>${esc(V.heard)}</div>`;
   if (V.reply && kind !== 'rec' && kind !== 'think') body += `<div class="v-msg house">${esc(V.reply)}</div>`;
   if (V.err) body += `<div class="v-msg bad">${esc(V.err)}</div>`;
   if (kind === 'ask') body += `<div class="v-actions"><button class="btn primary" data-vyes>כן, לפתוח</button><button class="btn" data-vclose>ביטול</button></div>`;
-  if (kind === 'err') body += `<div class="v-actions"><button class="btn" data-vagain>${MIC_SVG}לנסות שוב</button></div>`;
+  if (kind === 'err' && voiceOk() && !V.typed) body += `<div class="v-actions"><button class="btn" data-vagain>${MIC_SVG}לנסות שוב</button></div>`;
   el.className = 'voice-card k-' + kind;
-  el.innerHTML = `<div class="v-head"><span class="v-ic">${icon}</span><div class="v-title"><b>${head[0]}</b>${head[1] ? `<small>${head[1]}</small>` : ''}</div>
+  $('#voiceMain').innerHTML = `<div class="v-head"><span class="v-ic">${icon}</span><div class="v-title"><b>${head[0]}</b>${head[1] ? `<small>${head[1]}</small>` : ''}</div>
     <button class="v-x" data-vclose aria-label="סגירה">×</button></div><div class="v-body">${body}</div>`;
   el.hidden = false; bg.hidden = false;
-  // a plain answer goes away by itself
-  if (kind === 'ok') vAutoClose = setTimeout(closeVoice, 12000);
+  if (kind === 'ok') armAutoClose();
+}
+// a plain answer goes away by itself, unless a follow-up is being typed
+function armAutoClose() {
+  clearTimeout(vAutoClose);
+  const inp = $('#voiceText');
+  if (inp.value || document.activeElement === inp) return;
+  vAutoClose = setTimeout(() => { if (!inp.value && document.activeElement !== inp) closeVoice(); else armAutoClose(); }, 12000);
 }
 function closeVoice() {
   if (V.state === 'rec') stopRec(true);
-  Object.assign(V, { heard: '', reply: '', err: '', pending: false });
+  Object.assign(V, { open: false, sig: '', heard: '', reply: '', err: '', pending: false, typed: false });
+  const inp = $('#voiceText'); inp.value = ''; inp.blur(); $('.v-send').disabled = true;
   if (window.speechSynthesis) speechSynthesis.cancel();
   renderVoice();
 }
@@ -1139,7 +1153,8 @@ function speak(text) {
 
 async function startRec() {
   if (window.speechSynthesis) speechSynthesis.cancel();
-  Object.assign(V, { heard: '', reply: '', err: '', pending: false, chunks: [] });
+  Object.assign(V, { open: true, heard: '', reply: '', err: '', pending: false, typed: false, chunks: [] });
+  if (!voiceOk()) { renderVoice(); return; }   // no recorder here: the card opens for typing only
   try {
     V.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   } catch (e) {
@@ -1208,9 +1223,27 @@ $('#micBtn').addEventListener('click', () => {
   if (V.state === 'rec') stopRec();
   else if (V.state === 'idle') startRec();
 });
+// typing: touching the text line stops the recording; Enter / the arrow sends
+$('#voiceText').addEventListener('focus', () => { clearTimeout(vAutoClose); if (V.state === 'rec') stopRec(true); });
+$('#voiceText').addEventListener('input', (ev) => { clearTimeout(vAutoClose); $('.v-send').disabled = !ev.target.value.trim(); });
+$('#voiceForm').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const inp = $('#voiceText'), text = inp.value.trim().slice(0, 300);
+  if (!text || V.state === 'think') return;
+  if (V.state === 'rec') stopRec(true);
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  inp.value = ''; $('.v-send').disabled = true; inp.blur();
+  Object.assign(V, { open: true, heard: text, reply: '', err: '', pending: false, typed: true });
+  askHouse({ text });
+});
+// keep the card above the on-screen keyboard
+if (window.visualViewport) {
+  const kb = () => document.documentElement.style.setProperty('--kb', Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop) + 'px');
+  visualViewport.addEventListener('resize', kb); visualViewport.addEventListener('scroll', kb);
+}
 $('#voice').addEventListener('click', (ev) => {
   const t = ev.target.closest('button');
-  if (!t) return;
+  if (!t || t.closest('#voiceForm')) return;
   if ('vclose' in t.dataset) closeVoice();
   if ('vyes' in t.dataset) { V.pending = false; askHouse({ text: 'כן' }); }
   if ('vagain' in t.dataset) { V.err = ''; startRec(); }
