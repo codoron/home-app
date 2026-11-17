@@ -89,7 +89,7 @@ module.exports = ({ ha, view, runCalls, db, dom, objId, getMember, HA_URL, HA_TO
         text: { type: 'STRING', description: 'What to say, short, in the user\'s language (e.g. "להוציא את הכביסה")' },
         minutes: { type: 'NUMBER', description: 'In how many minutes from now' },
         at: { type: 'STRING', description: 'Clock time HH:MM (Israel), instead of minutes' },
-        speaker: { type: 'STRING', description: 'Exact id of a speaker from the list. Omit to use the speaker in the user\'s room (or the living room).' },
+        speaker: { type: 'STRING', description: 'Only if the user named a specific speaker: its exact id. Usually omit (the living-room Google Home is used).' },
       },
       required: ['text'],
     },
@@ -118,14 +118,16 @@ module.exports = ({ ha, view, runCalls, db, dom, objId, getMember, HA_URL, HA_TO
     if (a.at) at = nextAt(a.at);
     else if (a.minutes != null) { const n = Number(a.minutes); if (n >= 1 && n <= 24 * 60) at = Date.now() + Math.round(n) * 60000; }
     if (!at) throw new HttpsError('invalid-argument', 'time must be 1 minute to 24 hours ahead (minutes or HH:MM)');
-    const speakers = Object.values(v.entities).filter(isSpeaker);
+    const pickIn = (vv, speakers) => {
+      const areaOf = {}; for (const ar of vv.areas) for (const e of ar.entities) areaOf[e] = ar;
+      return speakers.find((x) => areaOf[x.id] && areaOf[x.id].id === m.room) ||
+        speakers.find((x) => areaOf[x.id] && /living|סלון/i.test(areaOf[x.id].id + ' ' + areaOf[x.id].name)) || speakers[0];
+    };
     let sp = a.speaker && v.entities[a.speaker];
     if (a.speaker && !isSpeaker(sp)) throw new HttpsError('invalid-argument', 'not a speaker this user may use: ' + a.speaker);
-    if (!sp) {
-      const areaOf = {}; for (const ar of v.areas) for (const e of ar.entities) areaOf[e] = ar;
-      sp = speakers.find((x) => areaOf[x.id] && areaOf[x.id].id === m.room) ||
-        speakers.find((x) => areaOf[x.id] && /living|סלון/i.test(areaOf[x.id].id + ' ' + areaOf[x.id].name)) || speakers[0];
-    }
+    if (!sp) sp = pickIn(v, Object.values(v.entities).filter(isSpeaker));
+    // a reminder only speaks, so anyone may use the house speaker (e.g. the living-room Google Home), even outside their rooms
+    if (!sp) { const all = await view({ role: 'parent' }); sp = pickIn(all, Object.values(all.entities).filter(isSpeaker)); }
     if (!sp) throw new HttpsError('failed-precondition', 'no Google speaker available to this user');
     const open = await db.collection('reminders').where('email', '==', m.email).where('status', '==', 'pending').get();
     if (open.size >= 20) throw new HttpsError('resource-exhausted', 'too many pending reminders (20)');
@@ -208,7 +210,7 @@ Rules:
 - If the box was already on (the tool note says so), the screen is assumed on. Mention briefly that if the screen is dark they can say "תדליק את המסך".
 - Run the screen power script only when the user explicitly talks about the screen being dark/off, or to turn the TV off (turn off the box and run the screen script once). Never toggle the screen twice.
 - After acting, confirm briefly what you did. If a tool returns an error, explain it simply.
-${channel === 'app' ? `- Reminders: "תזכיר לי בעוד X / בשעה HH:MM ..." → call remind (it is spoken on a Google speaker; by default the one in the user's room, or the living room). Then confirm the time and speaker from the tool result. Reminders work up to 24 hours ahead.\n` : ''}- Unlocking a door needs a confirmation; the tool will tell you. Then ask the user to ${channel === 'app' ? 'say or tap "כן"' : 'reply "כן"'}.
+${channel === 'app' ? `- Reminders: "תזכיר לי בעוד X / בשעה HH:MM ..." → call remind right away, without asking which speaker (omit speaker; it is spoken on the house Google speaker, in the living room). Then confirm the time and speaker from the tool result. Reminders work up to 24 hours ahead.\n` : ''}- Unlocking a door needs a confirmation; the tool will tell you. Then ask the user to ${channel === 'app' ? 'say or tap "כן"' : 'reply "כן"'}.
 
 Devices this user may use (id | name | state):
 ${deviceList(v, cfg)}`;
