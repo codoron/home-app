@@ -1085,20 +1085,39 @@ const vMime = () => ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/m
   .find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
 const voiceOk = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
 
+const MIC_SVG = '<svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM5 11h2a5 5 0 0 0 10 0h2a7 7 0 0 1-6 6.9V21h-2v-3.1A7 7 0 0 1 5 11z"/></svg>';
+let vAutoClose = null;
 function renderVoice() {
-  const btn = $('#micBtn'), el = $('#voice');
+  const btn = $('#micBtn'), el = $('#voice'), bg = $('#voiceBg');
   btn.hidden = !voiceOk() || !S.data;
   btn.classList.toggle('rec', V.state === 'rec');
   btn.classList.toggle('busy', V.state === 'think');
-  if (V.state === 'idle' && !V.reply && !V.err) { el.hidden = true; return; }
-  const status = { rec: '<span class="v-dot"></span>מקשיב… דברו, ולחצו שוב לסיום', think: '<span class="spinner sm"></span>רגע, בודק…' }[V.state] || '';
-  el.innerHTML = `<button class="v-x" data-vclose aria-label="סגירה">×</button>
-    ${status ? `<p class="v-status">${status}</p>` : ''}
-    ${V.heard ? `<p class="v-heard">🎤 "${esc(V.heard)}"</p>` : ''}
-    ${V.reply ? `<p class="v-reply">${esc(V.reply)}</p>` : ''}
-    ${V.err ? `<p class="v-reply err">${esc(V.err)}</p>` : ''}
-    ${V.pending && V.state === 'idle' ? `<div class="v-actions"><button class="btn primary" data-vyes>כן, לפתוח</button><button class="btn" data-vclose>ביטול</button></div>` : ''}`;
-  el.hidden = false;
+  btn.setAttribute('aria-label', V.state === 'rec' ? 'סיום הקלטה' : 'פקודה קולית');
+  clearTimeout(vAutoClose);
+  if (V.state === 'idle' && !V.reply && !V.err) { el.hidden = true; bg.hidden = true; el.className = 'voice-card'; return; }
+  const kind = V.state === 'rec' ? 'rec' : V.state === 'think' ? 'think' : V.err ? 'err' : V.pending ? 'ask' : 'ok';
+  const head = {
+    rec: ['מקשיב…', 'דברו עכשיו. לחיצה על המיקרופון מסיימת'],
+    think: ['רגע, בודק…', 'מעביר את הבקשה לבית'],
+    ok: ['הבית', ''],
+    ask: ['צריך אישור', ''],
+    err: ['לא הסתדר', ''],
+  }[kind];
+  const icon = { rec: MIC_SVG, think: '<span class="v-spin"></span>', ok: svg('home'), ask: svg('lock'), err: '!' }[kind];
+  let body = '';
+  if (kind === 'rec') body = `<div class="v-wave">${'<i></i>'.repeat(7)}</div>`;
+  if (kind === 'think') body = `<div class="v-dots"><i></i><i></i><i></i></div>`;
+  if (V.heard && kind !== 'rec') body += `<div class="v-msg me"><small>אמרת</small>${esc(V.heard)}</div>`;
+  if (V.reply && kind !== 'rec' && kind !== 'think') body += `<div class="v-msg house">${esc(V.reply)}</div>`;
+  if (V.err) body += `<div class="v-msg bad">${esc(V.err)}</div>`;
+  if (kind === 'ask') body += `<div class="v-actions"><button class="btn primary" data-vyes>כן, לפתוח</button><button class="btn" data-vclose>ביטול</button></div>`;
+  if (kind === 'err') body += `<div class="v-actions"><button class="btn" data-vagain>${MIC_SVG}לנסות שוב</button></div>`;
+  el.className = 'voice-card k-' + kind;
+  el.innerHTML = `<div class="v-head"><span class="v-ic">${icon}</span><div class="v-title"><b>${head[0]}</b>${head[1] ? `<small>${head[1]}</small>` : ''}</div>
+    <button class="v-x" data-vclose aria-label="סגירה">×</button></div><div class="v-body">${body}</div>`;
+  el.hidden = false; bg.hidden = false;
+  // a plain answer goes away by itself
+  if (kind === 'ok') vAutoClose = setTimeout(closeVoice, 12000);
 }
 function closeVoice() {
   if (V.state === 'rec') stopRec(true);
@@ -1147,6 +1166,7 @@ async function startRec() {
       let sum = 0; for (const x of buf) sum += x * x;
       const loud = Math.sqrt(sum / buf.length) > 0.02;
       if (loud) { spoke = true; quietSince = Date.now(); }
+      $('#voice').style.setProperty('--lvl', Math.min(1, Math.sqrt(sum / buf.length) * 14).toFixed(2));
       if ((spoke && Date.now() - quietSince > V_SILENCE_MS) || Date.now() - V.startedAt > V_MAX_MS) stopRec();
     }, 100);
   } catch { V.timer = setTimeout(() => stopRec(), V_MAX_MS); }
@@ -1193,7 +1213,10 @@ $('#voice').addEventListener('click', (ev) => {
   if (!t) return;
   if ('vclose' in t.dataset) closeVoice();
   if ('vyes' in t.dataset) { V.pending = false; askHouse({ text: 'כן' }); }
+  if ('vagain' in t.dataset) { V.err = ''; startRec(); }
 });
+// tapping outside closes the answer (not while listening or thinking)
+$('#voiceBg').addEventListener('click', () => { if (V.state === 'idle') closeVoice(); });
 
 /* ---------- boot ---------- */
 function show(id) { for (const s of ['login', 'denied', 'main', 'loading']) $('#' + s).hidden = s !== id; }
