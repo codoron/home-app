@@ -1,23 +1,13 @@
 # Bathroom 3-gang wall switch (BroadLink TC2, 433 MHz RF) - codes from the BroadLink app scenes "HA Codes on" / "HA scene off"
 # (switch did 01c478ed…, gangs: Main Switch = lcpanel_pwr, Wall light = pwr1, Ceiling light = pwr2).
+# "Main Switch" (lcpanel_pwr) toggles BOTH gangs, so it is not a separate light: the app's "all on/off" in the
+# lighting card turns the two lights on/off and keeps their state right. Its codes, for reference:
+#   on:  b64:sg9GAN8JCRYWCQkWCRYJFgkWCRYJFgkWCRYWCRYJCRYWCQkWCRYWCQkWCRYJFgkWCRYJFhYJFgkWCRYJFgkJFhYJCRYWCQkAAUg=
+#   off: b64:sg9GAN8JCRYWCQkWCRYJFgkWCRYJFgkWCRYWCRYJCRYWCQkWCRYJFhYJCRYJFgkWCRYJFhYJCRYJFgkWCRYWCRYJCRYWCQkAAUg=
 # Sent by the OLD Broadlink (RM Pro+, MAC 78:0f:77:18:1d:10, the one with the AC) = remote.rm_old.
 # App codes start with e9; the first byte is changed to b2 (433 MHz) for HA. One-way RF, so the state is optimistic.
 template:
   - light:
-      - name: "Bathroom main light"
-        unique_id: bathroom_main_light
-        turn_on:
-          - action: remote.send_command
-            target:
-              entity_id: remote.rm_old
-            data:
-              command: "b64:sg9GAN8JCRYWCQkWCRYJFgkWCRYJFgkWCRYWCRYJCRYWCQkWCRYWCQkWCRYJFgkWCRYJFhYJFgkWCRYJFgkJFhYJCRYWCQkAAUg="
-        turn_off:
-          - action: remote.send_command
-            target:
-              entity_id: remote.rm_old
-            data:
-              command: "b64:sg9GAN8JCRYWCQkWCRYJFgkWCRYJFgkWCRYWCRYJCRYWCQkWCRYJFhYJCRYJFgkWCRYJFhYJCRYJFgkWCRYWCRYJCRYWCQkAAUg="
       - name: "Bathroom wall light"
         unique_id: bathroom_wall_light
         turn_on:
