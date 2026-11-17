@@ -101,7 +101,7 @@ module.exports = ({ ha, view, fetchHouse, getCfg, runCalls, db, dom, objId, getM
     parameters: {
       type: 'OBJECT',
       properties: {
-        text: { type: 'STRING', description: 'What to say, short, in the user\'s language (e.g. "להוציא את הכביסה")' },
+        text: { type: 'STRING', description: 'Only the thing to do, short, in Hebrew as the user said it (e.g. "לכבות את הגז"). No "תזכורת", no name, no time.' },
         minutes: { type: 'NUMBER', description: 'In how many minutes from now' },
         at: { type: 'STRING', description: 'Clock time HH:MM (Israel), instead of minutes' },
         speaker: { type: 'STRING', description: 'Only if the user named a specific speaker: its exact id. Usually omit (the living-room Google Home is used).' },

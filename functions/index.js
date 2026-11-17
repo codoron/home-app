@@ -294,7 +294,10 @@ exports.reminders = onSchedule({ schedule: 'every 1 minutes', timeZone: 'Asia/Je
       tx.update(d.ref, { status: 'sending' }); return true;
     });
     if (!claimed) continue;
-    const message = (r.name ? `תזכורת ל${r.name}: ` : 'תזכורת: ') + r.text;
+    // only a Hebrew first name: an English or hyphenated full name comes out garbled in Hebrew TTS
+    const first = String(r.name || '').trim().split(/\s+/)[0].replace(/[-–־].*$/, '');
+    const text = String(r.text || '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '').trim();
+    const message = (/[\u0590-\u05FF]/.test(first) ? `תזכורת ל${first}. ` : 'תזכורת. ') + text;
     try {
       if (!tts) throw new Error('no tts entity in Home Assistant');
       await ha('/api/services/tts/speak', { method: 'POST', body: JSON.stringify({ entity_id: tts, media_player_entity_id: r.speaker, message, language: lang }) });
