@@ -22,6 +22,12 @@ service cloud.firestore {
         || (isParent() && resource.data.role == 'child' && changed().hasOnly(['room']));
     }
 
+    // reminders: written only by the functions; members read their own, parents read all
+    match /reminders/{id} {
+      allow read: if isMember() && (resource.data.email == email() || isParent());
+      allow write: if false;
+    }
+
     // config/app: sharedAreas (rooms every child can use)
     match /config/{doc} {
       allow read: if isMember();

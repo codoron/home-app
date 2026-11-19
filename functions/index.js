@@ -268,7 +268,8 @@ exports.haCall = onCall(SECRETS, async (req) => {
 
 const bot = require('./whatsapp')({ ha, view, fetchHouse, getCfg, runCalls, db, dom, objId, getMember, SERVICES, HA_URL, HA_TOKEN });
 exports.whatsapp = bot.whatsapp;
-exports.voice = bot.voice;   // voice commands from the app (same Gemini brain as WhatsApp)
+exports.voice = bot.voice;
+exports.reminderOps = bot.reminderOps;   // add / edit / cancel reminders from the app
 
 // Spoken reminders (set by voice in the app): every minute, speak the due ones on their Google speaker via HA TTS.
 // TTS engine: config/app.ttsEntity / ttsLanguage override; otherwise Nabu Casa cloud (he-IL), else the first tts.* entity.
@@ -290,7 +291,8 @@ exports.reminders = onSchedule({ schedule: 'every 1 minutes', timeZone: 'Asia/Je
     // claim it, so an overlapping run won't speak it twice
     const claimed = await db.runTransaction(async (tx) => {
       const cur = await tx.get(d.ref);
-      if (cur.data().status !== 'pending') return false;
+      // cancelled (deleted) or moved later in the meantime
+      if (!cur.exists || cur.data().status !== 'pending' || cur.data().at > Date.now()) return false;
       tx.update(d.ref, { status: 'sending' }); return true;
     });
     if (!claimed) continue;

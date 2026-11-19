@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, onSnapshot, arrayUnion, arrayRemove } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, onSnapshot, arrayUnion, arrayRemove, query, where } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js';
 import { firebaseConfig, AREA_NAMES, OWNER_EMAILS } from './config.js';
 
@@ -11,6 +11,7 @@ const fns = getFunctions(app, 'europe-west1');
 const haStates = httpsCallable(fns, 'haStates', { timeout: 25000 });
 const haCall = httpsCallable(fns, 'haCall', { timeout: 30000 });
 const voiceFn = httpsCallable(fns, 'voice', { timeout: 70000 });
+const remOps = httpsCallable(fns, 'reminderOps', { timeout: 30000 });
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -43,6 +44,8 @@ const P = {
   fridge: 'M6 2h12a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm1 2v5h10V4zm0 7v9h10v-9zM8 5h2v3H8zm0 7h2v4H8z',
   motion: 'M13 4a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM9.8 7.4 7 8.9V13H5V7.7L10.5 5c.9-.4 2-.1 2.5.8l1 2c.7 1.4 2.1 2.2 3.6 2.2H19v2h-1.4a6.3 6.3 0 0 1-4.3-1.7l-.7 3.3L15 15.2V22h-2v-5.6l-2.4-2.1L9.3 22H7.2z',
   right: 'M9 5l8 7-8 7z', left: 'M15 5 7 12l8 7z',
+  bell: 'M12 22a2.5 2.5 0 0 0 2.5-2.5h-5A2.5 2.5 0 0 0 12 22zm7-6V11a7 7 0 0 0-5.5-6.8V3a1.5 1.5 0 0 0-3 0v1.2A7 7 0 0 0 5 11v5l-2 2v1h18v-1z',
+  pencil: 'M3 17.2V21h3.8L17.8 10 14 6.2zM20.7 7a1 1 0 0 0 0-1.4l-2.3-2.3a1 1 0 0 0-1.4 0L15.2 5 19 8.8z',
   mute: 'M3 9h4l5-4v14l-5-4H3zm13.6 0L15 10.6 16.4 12 15 13.4 16.6 15l1.4-1.4 1.4 1.4 1.6-1.6-1.4-1.4L21 10.6 19.4 9 18 10.4z',
   home: 'M12 3 3 10v10a1 1 0 0 0 1 1h5v-6h6v6h5a1 1 0 0 0 1-1V10z',
   drag: 'M7 4h3v3H7zm7 0h3v3h-3zM7 10.5h3v3H7zm7 0h3v3h-3zM7 17h3v3H7zm7 0h3v3h-3z',
@@ -187,7 +190,8 @@ function viewMine() {
   if (isTablet()) {
     const favs = myFavs().filter(favOk);
     return `<h2>המועדפים של הבית</h2>` + quickActions(allControllable()) +
-      (favs.length ? sortGrid('fav', favs.map((id) => tile(id)).join('')) : `<div class="hint" style="margin-top:14px">אין עדיין מועדפים. לחצו על ☆ בפינה של מכשיר בכל חדר כדי להוסיף אותו לכאן.</div>`);
+      (favs.length ? sortGrid('fav', favs.map((id) => tile(id)).join('')) : `<div class="hint" style="margin-top:14px">אין עדיין מועדפים. לחצו על ☆ בפינה של מכשיר בכל חדר כדי להוסיף אותו לכאן.</div>`) +
+      viewReminders();
   }
   const room = S.data.areas.find((a) => a.id === me.room) || null;
   const favs = myFavs().filter(favOk);
@@ -196,6 +200,7 @@ function viewMine() {
 
   h += `<div class="sec-head"><h3>המועדפים שלי</h3>${favs.length > 1 ? editBtn('fav') : ''}</div>`;
   h += favs.length ? sortGrid('fav', favs.map((id) => tile(id)).join('')) : `<div class="hint">אין עדיין מועדפים. לחצו על ☆ בפינה של כל מכשיר כדי להוסיף אותו לכאן.</div>`;
+  h += viewReminders();
 
   if (room) {
     const canChange = me.role === 'parent';
@@ -335,6 +340,7 @@ window.addEventListener('popstate', () => {
   if (S.skipPop) { S.skipPop = false; return; }
   if (S.remote) { closeRemote(false); return; }
   if (S.gsheet) { closeGroup(false); return; }
+  if (S.rsheet) { closeRemSheet(false); return; }
   S.edit = false;
   if (S.room) { S.room = null; render(); window.scrollTo(0, 0); }
 });
@@ -397,6 +403,7 @@ function render() {
   initSortables();
   const mineLabel = document.querySelector('[data-tab="mine"] span');
   if (mineLabel) mineLabel.textContent = isTablet() ? 'מועדפים' : 'שלי';
+  renderBadgeOnly();
   if (isTablet()) { tickClock(); keepAwake(); }
   $('#status').className = 'status' + (S.ok ? '' : ' bad');
   $('#status').innerHTML = `<span class="dot${S.stale ? ' stale' : ''}"></span>${S.stale ? 'מתעדכן…' : S.ok ? 'מחובר לבית' : 'אין חיבור לבית'}`;
@@ -706,6 +713,7 @@ setInterval(() => {
   if (!isTablet() || Date.now() - lastTouch < 60000) return;
   if (S.remote) { closeRemote(true); return; }
   if (S.gsheet) { closeGroup(true); return; }
+  if (S.rsheet) { closeRemSheet(true); return; }
   if (S.room || S.tab !== 'rooms') {
     if (S.room) { S.room = null; history.back(); }
     S.tab = 'rooms'; render(); window.scrollTo(0, 0);
@@ -879,6 +887,7 @@ async function load() {
     // first screen: parents land on the house, children on their own screen
     if (!S.tab || S.data.me.role === 'tablet') S.tab = S.data.me.role === 'child' ? 'mine' : 'rooms';
     if (!S.unsubMembers) watchMembers();
+    if (!S.unsubRem) watchReminders();
     show('main');
     // don't redraw under someone who is typing or choosing in a form
     const a = document.activeElement;
@@ -989,6 +998,174 @@ function invite(m, how) {
   else location.href = `mailto:${encodeURIComponent(m.id)}?subject=${encodeURIComponent('הזמנה ל"הבית שלנו"')}&body=${encodeURIComponent(text)}`;
 }
 
+/* ---------- reminders (spoken on the Google speaker) ---------- */
+// Read live from Firestore (rules: own, or all for parents); changes go through the reminderOps function.
+S.rem = [];
+function watchReminders() {
+  if (S.unsubRem) S.unsubRem();
+  const me = S.data.me;
+  const q = me.role === 'parent'
+    ? query(collection(db, 'reminders'), where('status', '==', 'pending'))
+    : query(collection(db, 'reminders'), where('email', '==', me.email));
+  S.unsubRem = onSnapshot(q, (snap) => {
+    S.rem = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => r.status === 'pending').sort((a, b) => a.at - b.at);
+    if (S.tab === 'mine' && !S.edit) render(); else renderBadgeOnly();
+  }, () => {});
+}
+function renderBadgeOnly() {
+  const mineBtn = document.querySelector('[data-tab="mine"]');
+  if (!mineBtn) return;
+  const n = myReminders().length;
+  let b = mineBtn.querySelector('.badge');
+  if (n && !b) { b = document.createElement('i'); b.className = 'badge'; mineBtn.appendChild(b); }
+  if (b) { if (n) b.textContent = n; else b.remove(); }
+}
+const myReminders = () => (S.rem || []).filter((r) => S.data && r.email === S.data.me.email);
+const DAY = 864e5;
+function dayDiff(at) {
+  const a = new Date(at), n = new Date();
+  return Math.round((new Date(a.getFullYear(), a.getMonth(), a.getDate()) - new Date(n.getFullYear(), n.getMonth(), n.getDate())) / DAY);
+}
+const hhmm = (at) => new Date(at).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+function dayLabel(d, at) {
+  if (d === 0) return 'היום';
+  if (d === 1) return 'מחר';
+  return 'יום ' + new Date(at).toLocaleDateString('he-IL', { weekday: 'long' }).replace(/^יום\s*/, '');
+}
+function inText(at) {
+  const m = Math.round((at - Date.now()) / 60000);
+  if (m < 1) return 'עכשיו';
+  if (m < 60) return `בעוד ${m} דק׳`;
+  if (m < 3 * 60) { const h = Math.floor(m / 60), r = m % 60; return `בעוד ${h === 1 ? 'שעה' : 'שעתיים'}${r ? ` ו-${r} דק׳` : ''}`; }
+  return '';
+}
+function viewReminders() {
+  const me = S.data.me;
+  const mine = myReminders();
+  const others = me.role === 'parent' ? S.rem.filter((r) => r.email !== me.email) : [];
+  const row = (r, theirs) => {
+    const d = dayDiff(r.at), soon = inText(r.at);
+    const confirm = S.remConfirm === r.id;
+    return `<div class="rem${d === 0 ? ' today' : ''}">
+      <button class="rem-main" data-remedit="${esc(r.id)}" aria-label="עריכה">
+        <span class="rem-when"><b>${hhmm(r.at)}</b><small>${dayLabel(d, r.at)}</small></span>
+        <span class="rem-what"><b>${esc(r.text)}</b><small>${[theirs ? esc(r.name || 'הטאבלט') : '', soon, r.speakerName ? '🔊 ' + esc(r.speakerName) : ''].filter(Boolean).join(' · ')}</small></span>
+      </button>
+      <button class="rem-x${confirm ? ' sure' : ''}" data-remcancel="${esc(r.id)}" aria-label="ביטול התזכורת">${confirm ? 'לבטל?' : '×'}</button>
+    </div>`;
+  };
+  let h = `<div class="sec-head"><h3>${svg('bell')} התזכורות ${isTablet() ? 'של הטאבלט' : 'שלי'}</h3><button class="btn small" data-remadd>${svg('plus')}תזכורת</button></div>`;
+  h += mine.length ? `<div class="rems">${mine.map((r) => row(r)).join('')}</div>`
+    : `<div class="hint">אין תזכורות. אפשר להוסיף כאן, או לבקש מהמיקרופון: "תזכיר לי בעוד 20 דקות להוציא את הכביסה".</div>`;
+  if (others.length) h += `<h3 class="rem-others">תזכורות של הילדים</h3><div class="rems">${others.map((r) => row(r, true)).join('')}</div>`;
+  return h;
+}
+
+// cancel: the first tap asks ("לבטל?"), the second within 4s cancels
+let remConfirmT = null;
+async function cancelReminder(id, fromSheet) {
+  if (!fromSheet && S.remConfirm !== id) {
+    S.remConfirm = id; render();
+    clearTimeout(remConfirmT); remConfirmT = setTimeout(() => { S.remConfirm = null; if (S.tab === 'mine') render(); }, 4000);
+    return;
+  }
+  S.remConfirm = null;
+  const prev = S.rem;
+  S.rem = S.rem.filter((r) => r.id !== id); render();
+  if (fromSheet) closeRemSheet(true);
+  try { await remOps({ op: 'cancel', id }); toast('התזכורת בוטלה'); }
+  catch (e) { S.rem = prev; render(); toast('לא הצלחתי לבטל: ' + (e.message || '')); }
+}
+
+// the add / edit sheet
+const remForm = () => (S.remForm = S.remForm || {});
+function openRemSheet(id) {
+  const r = id && S.rem.find((x) => x.id === id);
+  if (id && !r) return;
+  const at = r ? r.at : Math.ceil((Date.now() + 30 * 60000) / (5 * 60000)) * (5 * 60000);
+  S.remForm = { id: r ? r.id : null, text: r ? r.text : '', day: Math.max(0, dayDiff(at)), time: new Date(at).toTimeString().slice(0, 5), owner: r && r.email !== S.data.me.email ? r.name : '' };
+  S.rsheet = id || 'new';
+  history.pushState({ rsheet: S.rsheet }, '');
+  let el = document.getElementById('rsheet');
+  if (!el) { el = document.createElement('div'); el.id = 'rsheet'; el.className = 'sheet'; document.body.appendChild(el); }
+  renderRemSheet();
+  requestAnimationFrame(() => { el.classList.add('open'); if (!id) setTimeout(() => { const i = $('#remText'); if (i) i.focus(); }, 260); });
+}
+function closeRemSheet(viaHistory) {
+  const el = document.getElementById('rsheet');
+  S.rsheet = null;
+  if (el) el.classList.remove('open');
+  if (viaHistory) { S.skipPop = true; history.back(); }
+}
+function remAt() {
+  const f = remForm();
+  const [h, m] = String(f.time || '').split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return null;
+  const d = new Date(); d.setDate(d.getDate() + (f.day || 0)); d.setHours(h, m, 0, 0);
+  return d.getTime();
+}
+function renderRemSheet(keep) {
+  const el = document.getElementById('rsheet');
+  if (!el || !S.rsheet) return;
+  const f = remForm();
+  if (keep) { const i = $('#remText'), tm = $('#remTime'); if (i) f.text = i.value; if (tm) f.time = tm.value; }
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const at = Date.now() + i * DAY;
+    return `<button type="button" class="chip${f.day === i ? ' on' : ''}" data-remday="${i}">${i < 2 ? dayLabel(i, at) : new Date(at).toLocaleDateString('he-IL', { weekday: 'short' })}</button>`;
+  }).join('');
+  const at = remAt();
+  const past = at && at < Date.now() + 30 * 1000;
+  el.innerHTML = `<div class="r-backdrop" data-rclose></div>
+  <div class="r-sheet rem-sheet" role="dialog" aria-label="תזכורת">
+    <div class="r-head">
+      <div class="r-title"><span class="h-ic sm">${svg('bell')}</span><div><b>${f.id ? 'עריכת תזכורת' : 'תזכורת חדשה'}</b><small>${f.owner ? 'של ' + esc(f.owner) + ' · ' : ''}תושמע ברמקול של הבית</small></div></div>
+      <button class="r-x" data-rclose aria-label="סגירה">×</button>
+    </div>
+    <form id="remFormEl" class="rem-form" autocomplete="off">
+      <label>מה להזכיר<input id="remText" maxlength="200" value="${esc(f.text)}" placeholder="למשל: לכבות את הגז" required></label>
+      <div class="rem-lbl">מתי</div>
+      <div class="chips">${days}</div>
+      <label class="rem-time">בשעה<input id="remTime" type="time" value="${esc(f.time)}" required></label>
+      <p class="rem-hint${past ? ' bad' : ''}" id="remHint">${past ? 'השעה הזו כבר עברה' : at ? `${dayLabel(f.day, at)} ב-${hhmm(at)}${inText(at) ? ' · ' + inText(at) : ''}` : ''}</p>
+      <div class="rem-actions">
+        <button type="submit" class="btn primary" id="remSave">${f.id ? 'שמירה' : 'הוספה'}</button>
+        ${f.id ? `<button type="button" class="btn danger" data-remdel>ביטול התזכורת</button>` : ''}
+      </div>
+    </form>
+  </div>`;
+}
+document.addEventListener('input', (ev) => {
+  if (!ev.target.closest('#rsheet')) return;
+  const f = remForm();
+  if (ev.target.id === 'remText') f.text = ev.target.value;
+  if (ev.target.id === 'remTime') {
+    f.time = ev.target.value;
+    const at = remAt(), hint = $('#remHint'), past = at && at < Date.now() + 30 * 1000;
+    if (hint) { hint.className = 'rem-hint' + (past ? ' bad' : ''); hint.textContent = past ? 'השעה הזו כבר עברה' : at ? `${dayLabel(f.day, at)} ב-${hhmm(at)}${inText(at) ? ' · ' + inText(at) : ''}` : ''; }
+  }
+});
+document.addEventListener('submit', async (ev) => {
+  if (ev.target.id !== 'remFormEl') return;
+  ev.preventDefault();
+  const f = remForm();
+  f.text = $('#remText').value.trim(); f.time = $('#remTime').value;
+  const at = remAt();
+  if (!f.text) return toast('מה להזכיר?');
+  if (!at || at < Date.now() + 30 * 1000) return toast('השעה הזו כבר עברה');
+  const btn = $('#remSave'); btn.disabled = true; btn.textContent = 'שומר…';
+  try {
+    if (f.id) await remOps({ op: 'update', id: f.id, text: f.text, at });
+    else await remOps({ op: 'add', text: f.text, at });
+    closeRemSheet(true);
+    toast(f.id ? 'התזכורת עודכנה' : `תזכורת ל${dayLabel(f.day, at)} ב-${hhmm(at)}`);
+  } catch (e) {
+    btn.disabled = false; btn.textContent = f.id ? 'שמירה' : 'הוספה';
+    toast('לא הצלחתי לשמור: ' + (e.message || ''));
+  }
+});
+// "in 12 min" labels stay fresh
+setInterval(() => { if (S.tab === 'mine' && S.rem && S.rem.length && !S.edit && !S.rsheet && !document.activeElement.closest?.('#view form')) render(); }, 60000);
+
 function watchMembers() {
   if (S.unsubMembers) S.unsubMembers();
   S.unsubMembers = onSnapshot(collection(db, 'members'), (snap) => {
@@ -1007,6 +1184,14 @@ document.addEventListener('click', async (ev) => {
   if (S.edit && t.closest('[data-sort]')) return;
   if (ds.fav) { ev.stopPropagation(); return toggleFav(ds.fav); }
   if (t.closest('#remote') && !ds.tap) return remoteClick(t, ev);
+  if (ds.remadd != null) return openRemSheet(null);
+  if (ds.remedit) return openRemSheet(ds.remedit);
+  if (ds.remcancel) return cancelReminder(ds.remcancel);
+  if (t.closest('#rsheet')) {
+    if ('rclose' in ds) return closeRemSheet(true);
+    if (ds.remday != null) { remForm().day = Number(ds.remday); return renderRemSheet(true); }
+    if ('remdel' in ds) return cancelReminder(S.rsheet, true);
+  }
   if (t.closest('#gsheet')) {
     if ('rclose' in ds) return closeGroup(true);
     if (ds.gall) return groupAll(ds.gall === 'on');
@@ -1028,7 +1213,7 @@ document.addEventListener('click', async (ev) => {
     $('#pickHead').scrollIntoView({ behavior: 'smooth' });
     return;
   }
-  if ('signout' in ds) { clearCaches(); await signOut(auth); return; }
+  if ('signout' in ds) { clearCaches(); if (S.unsubRem) { S.unsubRem(); S.unsubRem = null; } await signOut(auth); return; }
   if ('retry' in ds) return load();
   if (ds.wa || ds.mail) {
     const m = S.members.find((x) => x.id === (ds.wa || ds.mail));

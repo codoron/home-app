@@ -97,20 +97,77 @@ module.exports = ({ ha, view, fetchHouse, getCfg, runCalls, db, dom, objId, getM
   // app only: a spoken reminder on a Google speaker, played by the `reminders` scheduler (index.js)
   const REMIND_TOOL = {
     name: 'remind',
-    description: 'Schedule a spoken reminder on a Google speaker. Give either minutes (from now) or at (HH:MM, Israel time, the next time it comes).',
+    description: 'Schedule a spoken reminder on a Google speaker. Give either minutes (from now) or at (HH:MM, Israel time, the next time it comes). For another day use minutes.',
     parameters: {
       type: 'OBJECT',
       properties: {
         text: { type: 'STRING', description: 'Only the thing to do, short, in Hebrew as the user said it (e.g. "לכבות את הגז"). No "תזכורת", no name, no time.' },
-        minutes: { type: 'NUMBER', description: 'In how many minutes from now' },
+        minutes: { type: 'NUMBER', description: 'In how many minutes from now (up to 7 days)' },
         at: { type: 'STRING', description: 'Clock time HH:MM (Israel), instead of minutes' },
         speaker: { type: 'STRING', description: 'Only if the user named a specific speaker: its exact id. Usually omit (the living-room Google Home is used).' },
       },
       required: ['text'],
     },
   };
+  const LIST_REMINDERS_TOOL = {
+    name: 'list_reminders',
+    description: "List the user's pending spoken reminders (id, text, when). Use before changing or cancelling one.",
+    parameters: { type: 'OBJECT', properties: {} },
+  };
+  const CHANGE_REMINDER_TOOL = {
+    name: 'change_reminder',
+    description: 'Cancel or change one pending reminder (id from list_reminders). Give cancel=true, or any of: minutes (new time, from now), at (new HH:MM), postpone_minutes (push the current time later), text.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        id: { type: 'STRING' },
+        cancel: { type: 'BOOLEAN' },
+        minutes: { type: 'NUMBER' },
+        at: { type: 'STRING' },
+        postpone_minutes: { type: 'NUMBER' },
+        text: { type: 'STRING' },
+      },
+      required: ['id'],
+    },
+  };
   const toolsFor = (channel) => channel === 'app'
-    ? [{ functionDeclarations: [...TOOLS[0].functionDeclarations, REMIND_TOOL] }] : TOOLS;
+    ? [{ functionDeclarations: [...TOOLS[0].functionDeclarations, REMIND_TOOL, LIST_REMINDERS_TOOL, CHANGE_REMINDER_TOOL] }] : TOOLS;
+
+  const REM_MAX = 7 * 24 * 60;   // minutes ahead
+  const fmtAt = (at) => new Date(at).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem', weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
+  // a new time from {atMs | minutes | at "HH:MM" | postpone_minutes (from `base`)}; null if none given, throws if out of range
+  function newTime(a, base) {
+    let at = null;
+    if (a.atMs != null) at = Math.round(Number(a.atMs) / 60000) * 60000;
+    else if (a.at) at = nextAt(a.at);
+    else if (a.minutes != null) at = Date.now() + Math.round(Number(a.minutes)) * 60000;
+    else if (a.postpone_minutes != null && base) at = Math.max(base, Date.now()) + Math.round(Number(a.postpone_minutes)) * 60000;
+    else return null;
+    if (!(at >= Date.now() + 30 * 1000) || at > Date.now() + REM_MAX * 60000) throw new HttpsError('invalid-argument', 'time must be 1 minute to 7 days ahead');
+    return at;
+  }
+  async function listReminders(m) {
+    const q = await db.collection('reminders').where('email', '==', m.email).where('status', '==', 'pending').get();
+    return q.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.at - b.at)
+      .map((r) => ({ id: r.id, text: r.text, when: fmtAt(r.at) }));
+  }
+  // owner, or a parent (for the kids' reminders)
+  async function changeReminder(m, id, a) {
+    const ref = db.collection('reminders').doc(String(id || ''));
+    const snap = await ref.get();
+    const r = snap.exists ? snap.data() : null;
+    if (!r || r.status !== 'pending') throw new HttpsError('not-found', 'no such pending reminder');
+    if (r.email !== m.email && m.role !== 'parent') throw new HttpsError('permission-denied', 'not your reminder');
+    if (a.cancel) { await ref.delete(); return { status: 'cancelled', text: r.text }; }
+    const upd = {};
+    const at = newTime(a, r.at);
+    if (at) upd.at = at;
+    if (a.text != null) { const t = String(a.text).trim().slice(0, 200); if (!t) throw new HttpsError('invalid-argument', 'empty text'); upd.text = t; }
+    if (!Object.keys(upd).length) throw new HttpsError('invalid-argument', 'nothing to change');
+    upd.tries = 0; upd.edited = Date.now(); upd.editedBy = m.email;
+    await ref.update(upd);
+    return { status: 'changed', text: upd.text || r.text, when: fmtAt(upd.at || r.at) };
+  }
 
   const isSpeaker = (e) => e && dom(e.id) === 'media_player' && !e.remote &&
     (e.device_class === 'speaker' || /speaker|רמקול|nest|google ?home|home mini|hub|sonos/i.test(e.name + ' ' + e.id));
@@ -129,10 +186,8 @@ module.exports = ({ ha, view, fetchHouse, getCfg, runCalls, db, dom, objId, getM
   async function addReminder(m, v, a) {
     const text = String(a.text || '').trim().slice(0, 200);
     if (!text) throw new HttpsError('invalid-argument', 'missing reminder text');
-    let at;
-    if (a.at) at = nextAt(a.at);
-    else if (a.minutes != null) { const n = Number(a.minutes); if (n >= 1 && n <= 24 * 60) at = Date.now() + Math.round(n) * 60000; }
-    if (!at) throw new HttpsError('invalid-argument', 'time must be 1 minute to 24 hours ahead (minutes or HH:MM)');
+    const at = newTime(a);
+    if (!at) throw new HttpsError('invalid-argument', 'give a time: minutes from now or HH:MM');
     // a real Google Home / Nest first; soundbars and TVs (which also show up as Cast speakers) last
     const rank = (x) => { const n = x.name + ' ' + x.id;
       return /sound ?bar|סאונד ?בר|\blg\b|tv|טלוויזיה|bravia|samsung/i.test(n) ? 2 : /google|גוגל|nest|home ?mini|\bhome\b/i.test(n) ? 0 : 1; };
@@ -156,9 +211,8 @@ module.exports = ({ ha, view, fetchHouse, getCfg, runCalls, db, dom, objId, getM
     if (!sp) throw new HttpsError('failed-precondition', 'no Google speaker available to this user');
     const open = await db.collection('reminders').where('email', '==', m.email).where('status', '==', 'pending').get();
     if (open.size >= 20) throw new HttpsError('resource-exhausted', 'too many pending reminders (20)');
-    await db.collection('reminders').add({ email: m.email, name: m.role === 'tablet' ? '' : (m.name || ''), text, speaker: sp.id, at, status: 'pending', created: Date.now() });
-    const when = new Date(at).toLocaleTimeString('he-IL', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
-    return { status: 'scheduled', at: when, speaker: sp.name };
+    const ref = await db.collection('reminders').add({ email: m.email, name: m.role === 'tablet' ? '' : (m.name || ''), text, speaker: sp.id, speakerName: sp.name || '', at, status: 'pending', created: Date.now() });
+    return { status: 'scheduled', id: ref.id, at: fmtAt(at), speaker: sp.name };
   }
 
   function toCall(v, name, a) {
@@ -235,7 +289,8 @@ Rules:
 - If the box was already on (the tool note says so), the screen is assumed on. Mention briefly that if the screen is dark they can say "תדליק את המסך".
 - Run the screen power script only when the user explicitly talks about the screen being dark/off, or to turn the TV off (turn off the box and run the screen script once). Never toggle the screen twice.
 - After acting, confirm briefly what you did. If a tool returns an error, explain it simply.
-${channel === 'app' ? `- Reminders: "תזכיר לי בעוד X / בשעה HH:MM ..." → call remind right away, without asking which speaker (omit speaker; it is spoken on the house Google speaker, in the living room). Then confirm the time and speaker from the tool result. Reminders work up to 24 hours ahead.\n` : ''}- Unlocking a door needs a confirmation; the tool will tell you. Then ask the user to ${channel === 'app' ? 'say or tap "כן"' : 'reply "כן"'}.
+${channel === 'app' ? `- Reminders: "תזכיר לי בעוד X / בשעה HH:MM ..." → call remind right away, without asking which speaker (omit speaker; it is spoken on the house Google speaker, in the living room). Then confirm the time and speaker from the tool result. Reminders work up to 7 days ahead.
+- "מה התזכורות שלי?" → list_reminders. To cancel / move / postpone / reword one: list_reminders first (unless you already have the id), then change_reminder. If it's unclear which one, ask.\n` : ''}- Unlocking a door needs a confirmation; the tool will tell you. Then ask the user to ${channel === 'app' ? 'say or tap "כן"' : 'reply "כן"'}.
 
 Devices this user may use (id | name | state):
 ${deviceList(v, cfg)}`;
@@ -359,6 +414,15 @@ ${deviceList(v, cfg)}`;
       for (const fc of calls) {
         let response;
         try {
+          if (['list_reminders', 'change_reminder'].includes(fc.name)) {
+            if (channel !== 'app') throw new HttpsError('failed-precondition', 'reminders only from the app');
+            const a = fc.args || {};
+            response = fc.name === 'list_reminders' ? { reminders: await listReminders(m) } : await changeReminder(m, a.id, a);
+            if (fc.name === 'change_reminder') acted = true;
+            console.log(fc.name, JSON.stringify(a).slice(0, 120));
+            parts.push({ functionResponse: { name: fc.name, response } });
+            continue;
+          }
           if (fc.name === 'remind') {
             if (channel !== 'app') throw new HttpsError('failed-precondition', 'reminders only from the app');
             response = await addReminder(m, v, fc.args || {});
@@ -476,7 +540,21 @@ ${deviceList(v, cfg)}`;
     return { heard, ...r };
   });
 
-  return { whatsapp, voice };
+  // ---- the reminders screen in the app: add / update / cancel (reading is direct from Firestore, see rules) ----
+  // data: { op: 'add', text, at (ms) } | { op: 'update', id, text?, at? } | { op: 'cancel', id }
+  const reminderOps = onCall({ secrets: [HA_URL, HA_TOKEN], timeoutSeconds: 30 }, async (req) => {
+    const m = await getMember(req);
+    const d = req.data || {};
+    if (d.op === 'add') {
+      const v = await view(m);
+      return addReminder(m, v, { text: d.text, atMs: d.at });
+    }
+    if (d.op === 'update') return changeReminder(m, d.id, { text: d.text, atMs: d.at });
+    if (d.op === 'cancel') return changeReminder(m, d.id, { cancel: true });
+    throw new HttpsError('invalid-argument', 'unknown op');
+  });
+
+  return { whatsapp, voice, reminderOps };
 };
 
 module.exports.normPhone = normPhone;
