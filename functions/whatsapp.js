@@ -471,6 +471,7 @@ ${deviceList(v, cfg)}`;
     return { reply, pending: !!pending, acted };
   }
 
+  let waPhoneId = null;
   const whatsapp = onRequest(
     { secrets: [HA_URL, HA_TOKEN, WA_TOKEN, WA_APP_SECRET, WA_VERIFY], invoker: 'public', timeoutSeconds: 60, memory: '512MiB' },
     async (req, res) => {
@@ -488,6 +489,8 @@ ${deviceList(v, cfg)}`;
       const msg = (value.messages || [])[0];
       if (!msg) { res.sendStatus(200); return; }         // delivery/read receipts
       const phoneId = value.metadata?.phone_number_id;
+      // remember the bot's number id: house alerts (alerts.js) send from it
+      if (phoneId && phoneId !== waPhoneId) { waPhoneId = phoneId; db.doc('config/wa').set({ phoneId }, { merge: true }).catch(() => {}); }
       const from = normPhone(msg.from);
       try {
         // Meta retries; handle each message once
@@ -558,3 +561,4 @@ ${deviceList(v, cfg)}`;
 };
 
 module.exports.normPhone = normPhone;
+module.exports.WA_TOKEN = WA_TOKEN;

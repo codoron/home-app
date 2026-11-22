@@ -271,6 +271,11 @@ exports.whatsapp = bot.whatsapp;
 exports.voice = bot.voice;
 exports.reminderOps = bot.reminderOps;   // add / edit / cancel reminders from the app
 
+// House alerts (main door left open): HA → homeEvent → push + WhatsApp to the family
+const alerts = require('./alerts')({ ha, db, getMember, getCfg, HA_URL, HA_TOKEN, WA_TOKEN: require('./whatsapp').WA_TOKEN });
+exports.homeEvent = alerts.homeEvent;
+exports.pushToken = alerts.pushToken;    // a phone turned push on / off
+
 // Spoken reminders (set by voice in the app): every minute, speak the due ones on their Google speaker via HA TTS.
 // TTS engine: config/app.ttsEntity / ttsLanguage override; otherwise Nabu Casa cloud (he-IL), else the first tts.* entity.
 exports.reminders = onSchedule({ schedule: 'every 1 minutes', timeZone: 'Asia/Jerusalem', secrets: [HA_URL, HA_TOKEN], retryCount: 0, timeoutSeconds: 120 }, async () => {

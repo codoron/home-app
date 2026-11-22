@@ -461,3 +461,9 @@ body.tablet .v-msg.me { font-size: 18px; }
 .rem-actions .btn { flex: 1; padding: 13px; }
 .btn.danger { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
 @media (min-width: 768px) { .sheet .rem-sheet { width: min(480px, 94vw); } }
+
+/* push notifications card */
+.push-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; }
+.push-card .who { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.push-card .who small { color: var(--muted); line-height: 1.4; }
+.push-btns { display: flex; flex-direction: column; align-items: center; gap: 6px; flex-shrink: 0; }

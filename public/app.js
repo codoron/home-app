@@ -12,6 +12,7 @@ const haStates = httpsCallable(fns, 'haStates', { timeout: 25000 });
 const haCall = httpsCallable(fns, 'haCall', { timeout: 30000 });
 const voiceFn = httpsCallable(fns, 'voice', { timeout: 70000 });
 const remOps = httpsCallable(fns, 'reminderOps', { timeout: 30000 });
+const pushTokenFn = httpsCallable(fns, 'pushToken', { timeout: 20000 });
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -196,6 +197,7 @@ function viewMine() {
   const room = S.data.areas.find((a) => a.id === me.room) || null;
   const favs = myFavs().filter(favOk);
   let h = `<h2>שלום, ${esc(me.name.split(' ')[0])}</h2>`;
+  h += pushCard(true);
   h += quickActions(allControllable());
 
   h += `<div class="sec-head"><h3>המועדפים שלי</h3>${favs.length > 1 ? editBtn('fav') : ''}</div>`;
@@ -384,6 +386,7 @@ function viewFamily() {
       <div class="checks">${S.data.allAreas.map((a) => `<label><input type="checkbox" data-shared="${esc(a.id)}" ${shared.has(a.id) ? 'checked' : ''}>${esc(areaName(a))}</label>`).join('')}</div></div>`;
   }
   h += `<h3>החשבון שלי</h3><div class="card person"><div class="who"><b>${esc(me.name)}</b><small>${esc(me.email)}</small></div><button class="btn small" data-signout>התנתקות</button></div>`;
+  h += pushCard(false);
   return h;
 }
 
@@ -888,6 +891,7 @@ async function load() {
     if (!S.tab || S.data.me.role === 'tablet') S.tab = S.data.me.role === 'child' ? 'mine' : 'rooms';
     if (!S.unsubMembers) watchMembers();
     if (!S.unsubRem) watchReminders();
+    if (!S.pushChecked) { S.pushChecked = true; refreshPush(); }
     show('main');
     // don't redraw under someone who is typing or choosing in a form
     const a = document.activeElement;
@@ -1174,6 +1178,83 @@ function watchMembers() {
   }, () => {});
 }
 
+/* ---------- push notifications (house alerts: main door left open) ---------- */
+// The token is kept per phone/browser; the server sends to every member's tokens (not the shared tablet).
+const PUSH_KEY = 'push:token';
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+function pushStatus() {
+  if (pushSupported() && Notification.permission === 'denied') return 'blocked';
+  if (!pushSupported()) return isIOS && !standalone() ? 'ios-install' : 'unsupported';
+  if (Notification.permission === 'granted' && localStorage.getItem(PUSH_KEY)) return 'on';
+  return 'off';
+}
+let msgMod = null, messaging = null;
+async function pushToken() {
+  msgMod = msgMod || await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js');
+  if (!(await msgMod.isSupported())) throw new Error('הדפדפן הזה לא תומך בהתראות');
+  messaging = messaging || msgMod.getMessaging(app);
+  const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+  await navigator.serviceWorker.ready;
+  const token = await msgMod.getToken(messaging, { serviceWorkerRegistration: reg });
+  if (!S.pushListen) {
+    S.pushListen = true;
+    // app open in the foreground: show it anyway (and as a toast)
+    msgMod.onMessage(messaging, (p) => {
+      const n = p.notification || {};
+      toast(`${n.title || ''} · ${n.body || ''}`);
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      reg.showNotification(n.title || 'הבית שלנו', { body: n.body, icon: '/icon-192.png', tag: 'door', renotify: true, dir: 'rtl', lang: 'he' }).catch(() => {});
+    });
+  }
+  return token;
+}
+async function savePushToken(token) {
+  if (!token) throw new Error('לא התקבל אישור מהדפדפן');
+  if (localStorage.getItem(PUSH_KEY) === token && localStorage.getItem(PUSH_KEY + ':u') === S.user.email) return;
+  await pushTokenFn({ token, ua: navigator.userAgent });
+  localStorage.setItem(PUSH_KEY, token); localStorage.setItem(PUSH_KEY + ':u', S.user.email);
+}
+async function enablePush() {
+  try {
+    const p = await Notification.requestPermission();
+    if (p !== 'granted') { toast(p === 'denied' ? 'ההתראות נחסמו. אפשר לאפשר אותן בהגדרות הדפדפן' : 'ההתראות לא הופעלו'); render(); return; }
+    toast('מפעיל התראות…');
+    await savePushToken(await pushToken());
+    toast('ההתראות הופעלו ✓');
+  } catch (e) { toast('לא הצלחתי להפעיל התראות: ' + (e.message || '')); }
+  render();
+}
+async function disablePush() {
+  const t = localStorage.getItem(PUSH_KEY);
+  localStorage.removeItem(PUSH_KEY); localStorage.removeItem(PUSH_KEY + ':u');
+  if (t) {
+    await pushTokenFn({ token: t, op: 'remove' }).catch(() => {});
+    try { if (msgMod && messaging) await msgMod.deleteToken(messaging); } catch {}
+  }
+}
+// on every start: tokens can rotate, keep the server's copy fresh (silent, only when already allowed)
+async function refreshPush() {
+  if (isTablet() || !pushSupported() || Notification.permission !== 'granted' || !localStorage.getItem(PUSH_KEY)) return;
+  try { await savePushToken(await pushToken()); } catch (e) { console.warn('push refresh', e); }
+}
+function pushCard(compact) {
+  if (isTablet()) return '';
+  const st = pushStatus();
+  if (compact && (st === 'on' || st === 'unsupported' || localStorage.getItem('push:dismiss'))) return '';
+  const txt = {
+    on: 'ההתראות פעילות בטלפון הזה ✓',
+    off: 'קבלו התראה כשהדלת הראשית נשארת פתוחה.',
+    blocked: 'ההתראות חסומות בטלפון הזה. אפשר לאפשר אותן בהגדרות האתר בדפדפן.',
+    'ios-install': 'באייפון: לחצו על שיתוף ← "הוסף למסך הבית", פתחו את האפליקציה מהאייקון ואז הפעילו כאן התראות.',
+    unsupported: 'הדפדפן הזה לא תומך בהתראות.',
+  }[st];
+  const btn = st === 'off' ? '<button class="btn small primary" data-pushon>הפעלת התראות</button>'
+    : st === 'on' && !compact ? '<button class="btn small" data-pushtest>בדיקה</button>' : '';
+  return `<div class="card push-card"><div class="who"><b>🔔 התראות לטלפון</b><small>${txt}</small></div><div class="push-btns">${btn}${compact ? '<button class="link" data-pushhide>לא עכשיו</button>' : ''}</div></div>`;
+}
+
 /* ---------- events ---------- */
 document.addEventListener('click', async (ev) => {
   const t = ev.target.closest('button, [data-tap], [data-group], label, [data-rclose]');
@@ -1213,7 +1294,15 @@ document.addEventListener('click', async (ev) => {
     $('#pickHead').scrollIntoView({ behavior: 'smooth' });
     return;
   }
-  if ('signout' in ds) { clearCaches(); if (S.unsubRem) { S.unsubRem(); S.unsubRem = null; } await signOut(auth); return; }
+  if ('pushon' in ds) return enablePush();
+  if ('pushhide' in ds) { localStorage.setItem('push:dismiss', '1'); return render(); }
+  if ('pushtest' in ds) {
+    if (Notification.permission !== 'granted') return toast('ההתראות לא מאושרות');
+    const reg = await navigator.serviceWorker.getRegistration('/');
+    if (reg) reg.showNotification('🔔 בדיקה', { body: 'כך תיראה התראה מהבית', icon: '/icon-192.png', dir: 'rtl', lang: 'he' });
+    return;
+  }
+  if ('signout' in ds) { await disablePush(); clearCaches(); if (S.unsubRem) { S.unsubRem(); S.unsubRem = null; } await signOut(auth); return; }
   if ('retry' in ds) return load();
   if (ds.wa || ds.mail) {
     const m = S.members.find((x) => x.id === (ds.wa || ds.mail));

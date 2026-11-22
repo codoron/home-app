@@ -1,0 +1,109 @@
+# Main door left open: after 10 minutes open, and again every 5 minutes while it stays open:
+#   - push to every family member's phone + WhatsApp to everyone with a phone (via the home-app function homeEvent)
+#   - spoken on the living-room Google Home (not during quiet hours, 22:00-07:00)
+# When it closes after an alert: "the door closed" on push + WhatsApp (and spoken, outside quiet hours).
+#
+# Before loading: replace the two ids below everywhere in this file (Settings -> Tools -> States):
+#   binary_sensor.main_door_sensor  -> the Sonoff SNZB-04P door sensor
+#   media_player.living_room_speaker -> the living-room Google Home (not the LG soundbar)
+# The function double-checks the sensor's real state in HA, so a call can't fake an alert.
+
+rest_command:
+  home_event:
+    url: "https://europe-west1-home-app-f94e4.cloudfunctions.net/homeEvent"
+    method: POST
+    content_type: "application/json"
+    timeout: 20
+    payload: '{"entity": "{{ entity }}", "event": "{{ event }}"}'
+
+input_boolean:
+  main_door_alerted:
+    name: "Main door open alert sent"
+    icon: mdi:door-open
+
+automation:
+  - id: main_door_open_alert
+    alias: "Main door open alert"
+    description: "Push + WhatsApp + Google Home when the main door is open 10 min, every 5 min until closed"
+    # a close restarts the automation and stops the repeat loop
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.main_door_sensor
+        to: "on"
+        for: "00:10:00"
+        id: open
+      - trigger: state
+        entity_id: binary_sensor.main_door_sensor
+        from: "on"
+        to: "off"
+        id: closed
+    variables:
+      door: binary_sensor.main_door_sensor
+      speaker: media_player.living_room_speaker
+    actions:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: open
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.main_door_alerted
+              - repeat:
+                  sequence:
+                    - variables:
+                        minutes: "{{ ((now() - states[door].last_changed).total_seconds() / 60) | round(0) | int }}"
+                    - action: rest_command.home_event
+                      continue_on_error: true
+                      data:
+                        entity: "{{ door }}"
+                        event: open
+                    - if:
+                        - condition: time
+                          after: "07:00:00"
+                          before: "22:00:00"
+                      then:
+                        - action: tts.speak
+                          continue_on_error: true
+                          target:
+                            entity_id: tts.home_assistant_cloud
+                          data:
+                            media_player_entity_id: "{{ speaker }}"
+                            language: he-IL
+                            message: "שימו לב, הדלת הראשית פתוחה כבר {{ minutes }} דקות"
+                    - delay: "00:05:00"
+                  until:
+                    - condition: not
+                      conditions:
+                        - condition: state
+                          entity_id: binary_sensor.main_door_sensor
+                          state: "on"
+          - conditions:
+              - condition: trigger
+                id: closed
+              - condition: state
+                entity_id: input_boolean.main_door_alerted
+                state: "on"
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.main_door_alerted
+              - action: rest_command.home_event
+                continue_on_error: true
+                data:
+                  entity: "{{ door }}"
+                  event: closed
+              - if:
+                  - condition: time
+                    after: "07:00:00"
+                    before: "22:00:00"
+                then:
+                  - action: tts.speak
+                    continue_on_error: true
+                    target:
+                      entity_id: tts.home_assistant_cloud
+                    data:
+                      media_player_entity_id: "{{ speaker }}"
+                      language: he-IL
+                      message: "הדלת הראשית נסגרה"
