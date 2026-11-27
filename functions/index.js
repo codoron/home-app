@@ -43,6 +43,7 @@ const FAN_RE = /(^|_|\b)fan(_|\b|$)|מאוורר/i;
 const AC_RE = /(^|_|\b)(ac|aircon|air_con)(_|\b|$)|מזגן|מיזוג/i;
 const READ_ONLY = { binary_sensor: ['door', 'window', 'opening', 'garage_door', 'motion', 'occupancy'], sensor: ['temperature', 'humidity'] };
 const PARENT_ONLY = ['lock'];
+const CONTACT_RE = /door|window|fridge|refrigerator|freezer|contact|דלת|חלון|מקרר|מקפיא/i;
 
 const dom = (e) => e.split('.')[0];
 
@@ -98,13 +99,17 @@ function shown(s) {
   const d = dom(s.entity_id);
   if (SERVICES[d]) return true;
   if (d === 'camera') return true;   // viewed through camSnap, never controlled
-  if (READ_ONLY[d]) return READ_ONLY[d].includes(s.attributes.device_class);
+  if (READ_ONLY[d] && READ_ONLY[d].includes(s.attributes.device_class)) return true;
+  // contact sensors that HA didn't give a device class (e.g. Sonoff SNZB-04P via SonoffLAN): go by the name
+  if (d === 'binary_sensor' && !['motion', 'occupancy', 'connectivity', 'problem', 'battery', 'update'].includes(s.attributes.device_class) &&
+    CONTACT_RE.test(s.entity_id + ' ' + (s.attributes.friendly_name || ''))) return true;
   return false;
 }
 
 function slim(s) {
   const a = s.attributes || {};
   const o = { id: s.entity_id, name: a.friendly_name || s.entity_id, state: s.state };
+  if (dom(s.entity_id) === 'binary_sensor' && s.last_changed) o.since = Date.parse(s.last_changed);
   for (const k of ['device_class', 'unit_of_measurement', 'brightness', 'current_position', 'temperature',
     'current_temperature', 'hvac_modes', 'min_temp', 'max_temp', 'target_temp_step', 'assumed_state', 'supported_features']) {
     if (a[k] !== undefined) o[k] = a[k];

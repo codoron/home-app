@@ -68,7 +68,7 @@ function iconFor(e) {
   if (d === 'light' || (lamp && /\bfan\b|מאוורר/.test(n) && d !== 'fan')) return 'bulb';
   if (d === 'lock') return e.state === 'unlocked' ? 'unlock' : 'lock';
   if (d === 'camera') return 'cam';
-  if (d === 'binary_sensor') return ['motion', 'occupancy'].includes(e.device_class) ? 'motion' : 'door';
+  if (d === 'binary_sensor') return ['motion', 'occupancy'].includes(e.device_class) ? 'motion' : isFridge(e) ? 'fridge' : 'door';
   if (d === 'sensor') return /fridge|refrigerator|מקרר|freezer|מקפיא/.test(n) ? 'fridge' : 'temp';
   if (d === 'climate' || /\bac\b|ac_|aircon|air con|מזגן|מיזוג/.test(n)) return /heat|חימום/.test(n) ? 'sun' : 'snow';
   if (/\btv\b|tv_|television|טלוויזיה|\byes\b|netflix|apple tv|chromecast/.test(n)) return 'tv';
@@ -89,6 +89,17 @@ function iconFor(e) {
 const TOGGLE = ['light', 'switch', 'input_boolean', 'fan', 'media_player'];
 const RUN = ['script', 'scene', 'button'];
 const SENSOR = ['sensor', 'binary_sensor'];
+// door / window / fridge contact sensors get a tile of their own (open = alert); other sensors stay chips
+const isContact = (e) => !!e && dom(e.id) === 'binary_sensor' && !['motion', 'occupancy'].includes(e.device_class);
+const isFridge = (e) => /fridge|refrigerator|freezer|מקרר|מקפיא/i.test(e.name + ' ' + e.id);
+const contactOpen = (e) => isContact(e) && e.state === 'on';
+function contactText(e) {
+  if (e.state === 'unavailable' || e.state === 'unknown') return 'לא זמין';
+  const m = isFridge(e) ? ['פתוח', 'סגור'] : ['פתוחה', 'סגורה'];
+  if (e.state !== 'on') return m[1];
+  const min = e.since ? Math.floor((Date.now() - e.since) / 60000) : 0;
+  return min >= 1 ? `${m[0]} · ${min < 60 ? `${min} דק׳` : `${Math.floor(min / 60)} שע׳`}` : m[0];
+}
 
 function stateText(e) {
   const d = dom(e.id), s = e.state;
@@ -100,11 +111,11 @@ function stateText(e) {
     const t = { open: 'פתוח', closed: 'סגור', opening: 'נפתח…', closing: 'נסגר…' }[s] || s;
     return e.current_position != null && s === 'open' && e.current_position < 100 ? `פתוח ${e.current_position}%` : t;
   }
-  if (d === 'lock') return { locked: 'נעול', unlocked: 'פתוח', locking: 'ננעל…', unlocking: 'נפתח…', jammed: 'תקוע!', open: 'פתוח' }[s] || s;
+  if (d === 'lock') return { locked: 'נעול', unlocked: 'לא נעול', locking: 'ננעל…', unlocking: 'נפתח…', jammed: 'תקוע!', open: 'פתוח' }[s] || s;
   if (d === 'climate') return s === 'off' ? 'כבוי' : ({ cool: 'קירור', heat: 'חימום', fan_only: 'מאוורר', dry: 'ייבוש', auto: 'אוטומטי', heat_cool: 'אוטומטי' }[s] || s);
   if (d === 'binary_sensor') {
     if (['motion', 'occupancy'].includes(e.device_class)) return s === 'on' ? 'יש תנועה' : 'שקט';
-    return s === 'on' ? 'פתוח' : 'סגור';
+    return contactText(e);
   }
   if (d === 'sensor') return `${s}${e.unit_of_measurement || ''}`;
   if (RUN.includes(d)) return 'הפעלה';
@@ -131,10 +142,11 @@ function tile(id, opts = {}) {
   if (isOn(e)) cls.push('on');
   if (d === 'cover' && e.state === 'open') cls.push('open');
   if (d === 'lock' && e.state !== 'locked') cls.push('alert');
+  if (contactOpen(e)) cls.push('alert');
   if (d === 'climate' || (RUN.includes(d) && /snow|sun/.test(iconFor(e)))) cls.push('cool');
   if (S.busy.has(id)) cls.push('busy');
   if (na) cls.push('na');
-  const star = opts.noFav || SENSOR.includes(d) ? '' :
+  const star = opts.noFav || (SENSOR.includes(d) && !isContact(e)) ? '' :
     `<button class="fav ${fav ? 'is' : ''}" data-fav="${esc(id)}" aria-label="${fav ? 'הסרה מהמועדפים' : 'הוספה למועדפים'}">${svg('star')}</button>`;
   const head = `<div class="ic">${svg(iconFor(e))}</div>`;
   const label = `<div><div class="nm">${esc(e.name)}</div><div class="st">${esc(stateText(e))}</div></div>`;
@@ -158,13 +170,14 @@ function tile(id, opts = {}) {
       </div></div>`;
   }
   if (d === 'camera') return camTile(e, star, opts);
+  if (isContact(e)) return `<div class="${cls.join(' ')} sensor" data-key="${esc(id)}">${star}${head}${label}</div>`;
   if (SENSOR.includes(d)) return '';
   return `<div class="${cls.join(' ')}" data-key="${esc(id)}" data-tap="${esc(id)}" role="button" tabindex="0">${star}${head}${label}</div>`;
 }
 
 function sensorChips(ids) {
   const own = camSensors();
-  const chips = ids.map(ent).filter((e) => e && SENSOR.includes(dom(e.id)) && e.state !== 'unavailable' && !own.has(e.id)).map((e) => {
+  const chips = ids.map(ent).filter((e) => e && SENSOR.includes(dom(e.id)) && !isContact(e) && e.state !== 'unavailable' && !own.has(e.id)).map((e) => {
     const alert = dom(e.id) === 'binary_sensor' && e.state === 'on' && !['motion', 'occupancy'].includes(e.device_class);
     return `<span class="chip ${alert ? 'alert' : ''}">${esc(e.name)}: ${esc(stateText(e))}</span>`;
   });
@@ -272,16 +285,18 @@ function roomSummary(ids) {
   const lights = es.filter((e) => TOGGLE.includes(dom(e.id)) && isOn(e)).length;
   const open = es.filter((e) => dom(e.id) === 'cover' && e.state === 'open').length;
   const unlocked = es.some((e) => dom(e.id) === 'lock' && e.state !== 'locked');
-  const doorOpen = es.some((e) => dom(e.id) === 'binary_sensor' && e.state === 'on' && !['motion', 'occupancy'].includes(e.device_class));
+  const openC = es.filter(contactOpen);
+  const doorOpen = openC.some((e) => !isFridge(e)), fridgeOpen = openC.some(isFridge);
   const temp = es.find((e) => dom(e.id) === 'sensor' && e.device_class === 'temperature' && !isNaN(parseFloat(e.state)));
   const parts = [];
   if (lights) parts.push(lights === 1 ? 'מכשיר אחד דולק' : `${lights} דולקים`);
   if (open) parts.push(open === 1 ? 'תריס פתוח' : `${open} תריסים פתוחים`);
   const person = es.some((e) => dom(e.id) === 'camera' && camState(e).person);
   if (person) parts.push('זוהה אדם במצלמה');
+  if (doorOpen) parts.push('הדלת פתוחה');
   if (unlocked) parts.push('הדלת לא נעולה');
-  else if (doorOpen) parts.push('דלת פתוחה');
-  return { text: parts.join(' · ') || 'הכול כבוי', on: lights > 0, alert: unlocked || doorOpen || person, temp: temp ? `${Math.round(parseFloat(temp.state) * 10) / 10}°` : '' };
+  if (fridgeOpen) parts.push('המקרר פתוח');
+  return { text: parts.join(' · ') || 'הכול כבוי', on: lights > 0, alert: unlocked || doorOpen || fridgeOpen || person, temp: temp ? `${Math.round(parseFloat(temp.state) * 10) / 10}°` : '' };
 }
 
 function roomById(id) {
@@ -481,9 +496,17 @@ function groupRoom(roomId, ids) {
     S.tvExtras[tvs[0]] = extras;
     extras.forEach((id) => used.add(id));
   }
+  const camOwn = camSensors();
   for (const id of ids) {
-    if (used.has(id) || out.hidden.has(id) || SENSOR.includes(dom(id))) continue;
+    if (used.has(id) || out.hidden.has(id) || camOwn.has(id) || (SENSOR.includes(dom(id)) && !isContact(ent(id)))) continue;
     (isNA(ent(id)) ? out.na : out.tiles).push(id);
+  }
+  // a door sensor sits right after the lock, so "locked" and "open" are read together
+  const lock = out.tiles.find((id) => dom(id) === 'lock');
+  const doors = out.tiles.filter((id) => isContact(ent(id)) && !isFridge(ent(id)));
+  if (lock && doors.length) {
+    out.tiles = out.tiles.filter((id) => !doors.includes(id));
+    out.tiles.splice(out.tiles.indexOf(lock) + 1, 0, ...doors);
   }
   return out;
 }
@@ -706,6 +729,7 @@ function homeStatus() {
   chips.push(`<span class="hs ${lights ? 'on' : ''}">${lights ? `${lights} דולקים` : 'הכול כבוי'}</span>`);
   if (open) chips.push(`<span class="hs">${open === 1 ? 'תריס אחד פתוח' : `${open} תריסים פתוחים`}</span>`);
   for (const l of locks) chips.push(`<span class="hs ${l.state === 'locked' ? '' : 'alert'}">${esc(l.name)}: ${esc(stateText(l))}</span>`);
+  for (const c of es.filter(contactOpen)) chips.push(`<span class="hs alert">${esc(c.name)}: ${esc(contactText(c))}</span>`);
   return `<div class="panel"><div class="clock" id="clock"></div><div class="date" id="date"></div><div class="hs-row">${chips.join('')}</div></div>`;
 }
 function tickClock() {
