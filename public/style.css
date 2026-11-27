@@ -515,3 +515,6 @@ body.tablet .v-msg.me { font-size: 18px; }
 /* door / fridge contact sensors: read-only tiles */
 .tile.sensor { cursor: default; }
 .tile.sensor:not(.alert) .ic { opacity: .75; }
+
+.tile .st .bat { white-space: nowrap; }
+.tile .st .bat.low { color: var(--warn); font-weight: 600; }

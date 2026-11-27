@@ -101,7 +101,7 @@ function shown(s) {
   if (d === 'camera') return true;   // viewed through camSnap, never controlled
   if (READ_ONLY[d] && READ_ONLY[d].includes(s.attributes.device_class)) return true;
   // contact sensors that HA didn't give a device class (e.g. Sonoff SNZB-04P via SonoffLAN): go by the name
-  if (d === 'binary_sensor' && !['motion', 'occupancy', 'connectivity', 'problem', 'battery', 'update'].includes(s.attributes.device_class) &&
+  if (d === 'binary_sensor' && !['motion', 'occupancy', 'connectivity', 'problem', 'battery', 'battery_charging', 'update'].includes(s.attributes.device_class) &&
     CONTACT_RE.test(s.entity_id + ' ' + (s.attributes.friendly_name || ''))) return true;
   return false;
 }
@@ -127,7 +127,7 @@ async function getCfg() {
 }
 
 // Each camera's sibling entities on the same HA device (the ONVIF motion / person sensors). Cached like areas.
-const CAM_TPL = "{% set ns = namespace(c=[]) %}{% for s in states.camera %}{% set d = device_id(s.entity_id) %}{% if d %}{% set ns.c = ns.c + [[s.entity_id, device_entities(d)]] %}{% endif %}{% endfor %}{{ ns.c | tojson }}";
+const CAM_TPL = "{% set ns = namespace(c=[]) %}{% for s in (states.camera | list) + (states.lock | list) %}{% set d = device_id(s.entity_id) %}{% if d %}{% set ns.c = ns.c + [[s.entity_id, device_entities(d)]] %}{% endif %}{% endfor %}{{ ns.c | tojson }}";
 let camCache = null, camAt = 0;
 async function getCams() {
   if (camCache && Date.now() - camAt < 5 * 60 * 1000) return camCache;
@@ -222,6 +222,20 @@ async function view(m, pre) {
       entities[id].cam_motion = motion;
       for (const e of motion) entities[e] = slim(byId[e]);
     }
+  }
+  // A lock card shows its battery (same HA device, e.g. the Nuki "Battery" / "Battery charging" entities)
+  const raw = {};
+  for (const s of states) raw[s.entity_id] = s;
+  for (const id of Object.keys(entities)) {
+    if (dom(id) !== 'lock') continue;
+    const name = nm(id).toLowerCase();
+    const sib = (cams[id] || []).length ? cams[id] : Object.keys(raw).filter((e) => (raw[e].attributes.friendly_name || '').toLowerCase().startsWith(name + ' '));
+    const cls = (e) => raw[e] && raw[e].attributes.device_class;
+    const lvl = sib.find((e) => dom(e) === 'sensor' && cls(e) === 'battery');
+    const chg = sib.find((e) => dom(e) === 'binary_sensor' && cls(e) === 'battery_charging');
+    const n = lvl && parseFloat(raw[lvl].state);
+    if (Number.isFinite(n)) entities[id].battery = Math.round(n);
+    if (chg && raw[chg].state === 'on') entities[id].charging = true;
   }
   // remote entities are controls behind a TV, never tiles of their own
   for (const a of outAreas) a.entities = a.entities.filter((e) => dom(e) !== 'remote');

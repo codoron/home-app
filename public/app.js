@@ -90,7 +90,7 @@ const TOGGLE = ['light', 'switch', 'input_boolean', 'fan', 'media_player'];
 const RUN = ['script', 'scene', 'button'];
 const SENSOR = ['sensor', 'binary_sensor'];
 // door / window / fridge contact sensors get a tile of their own (open = alert); other sensors stay chips
-const isContact = (e) => !!e && dom(e.id) === 'binary_sensor' && !['motion', 'occupancy'].includes(e.device_class);
+const isContact = (e) => !!e && dom(e.id) === 'binary_sensor' && !['motion', 'occupancy', 'battery', 'battery_charging'].includes(e.device_class);
 const isFridge = (e) => /fridge|refrigerator|freezer|מקרר|מקפיא/i.test(e.name + ' ' + e.id);
 const contactOpen = (e) => isContact(e) && e.state === 'on';
 function contactText(e) {
@@ -149,7 +149,13 @@ function tile(id, opts = {}) {
   const star = opts.noFav || (SENSOR.includes(d) && !isContact(e)) ? '' :
     `<button class="fav ${fav ? 'is' : ''}" data-fav="${esc(id)}" aria-label="${fav ? 'הסרה מהמועדפים' : 'הוספה למועדפים'}">${svg('star')}</button>`;
   const head = `<div class="ic">${svg(iconFor(e))}</div>`;
-  const label = `<div><div class="nm">${esc(e.name)}</div><div class="st">${esc(stateText(e))}</div></div>`;
+  let st = esc(stateText(e));
+  // a lock shows its battery next to the state
+  if (d === 'lock' && (e.battery != null || e.charging)) {
+    const low = e.battery != null && e.battery < 20 && !e.charging;
+    st += ` · <span class="bat${low ? ' low' : ''}">${e.charging ? '⚡ ' : ''}🔋 ${e.battery != null ? e.battery + '%' : 'בטעינה'}</span>`;
+  }
+  const label = `<div><div class="nm">${esc(e.name)}</div><div class="st">${st}</div></div>`;
 
   if (d === 'cover') {
     const f = e.supported_features ?? 11;
