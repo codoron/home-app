@@ -24,9 +24,8 @@ module.exports = ({ ha, db, getMember, getCfg, HA_URL, HA_TOKEN, WA_TOKEN }) => 
     if (!tts) return 'no tts';
     if (!lang) lang = /google_translate/.test(tts) ? 'iw' : 'he-IL';
     // same speaker as the reminders: pinned, else the one the last spoken reminder used, else the best Google speaker
-    let sp = cfg.alertSpeaker || cfg.reminderSpeaker;
-    // the living-room Google Home (media_player.living_room_speaker is the LG soundbar, not this)
-    if (!sp && ids.has('media_player.google_home')) sp = 'media_player.google_home';
+    // the living-room Google Home first (media_player.living_room_speaker is the LG soundbar, never this)
+    let sp = cfg.alertSpeaker || (ids.has('media_player.google_home') ? 'media_player.google_home' : cfg.reminderSpeaker);
     if (!sp) {
       const done = await db.collection('reminders').where('status', '==', 'done').limit(20).get();
       const last = done.docs.map((d) => d.data()).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0))[0];
