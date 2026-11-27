@@ -1,37 +1,8 @@
 # Main door left open: after 10 minutes open, and again every 5 minutes while it stays open,
 # HA calls the home-app function homeEvent, which sends push + WhatsApp to the family and speaks on the
 # living-room Google Home (not 22:00-07:00). When the door closes after an alert: "the door closed".
-# Nothing to fill in: the door sensor is found by itself (below), the speaker is picked by the function
-# (the same one the spoken reminders use).
-
-template:
-  - binary_sensor:
-      # Mirrors the main door sensor: a door/opening sensor whose name says main/front/entrance (Sonoff first),
-      # else the first door sensor. Check which one it took: attribute "source" (Settings -> Tools -> States).
-      - name: "Main door alert source"
-        unique_id: main_door_alert_source
-        device_class: door
-        state: >
-          {% set ns = namespace(d=[]) %}
-          {% for s in states.binary_sensor if s.entity_id != 'binary_sensor.main_door_alert_source'
-               and s.attributes.device_class in ['door', 'opening'] and s.state in ['on', 'off'] %}
-            {% set ns.d = ns.d + [s] %}
-          {% endfor %}
-          {% set a = ns.d | selectattr('name', 'search', '(?i)main door sensor|door sensor|חיישן') | list %}
-          {% set b = ns.d | selectattr('name', 'search', '(?i)main|front|entrance|ראשי|כניסה') | list %}
-          {% set pick = (a or b or ns.d) | first %}
-          {{ pick is defined and pick.state == 'on' }}
-        attributes:
-          source: >
-            {% set ns = namespace(d=[]) %}
-            {% for s in states.binary_sensor if s.entity_id != 'binary_sensor.main_door_alert_source'
-                 and s.attributes.device_class in ['door', 'opening'] and s.state in ['on', 'off'] %}
-              {% set ns.d = ns.d + [s] %}
-            {% endfor %}
-            {% set a = ns.d | selectattr('name', 'search', '(?i)main door sensor|door sensor|חיישן') | list %}
-            {% set b = ns.d | selectattr('name', 'search', '(?i)main|front|entrance|ראשי|כניסה') | list %}
-            {% set pick = (a or b or ns.d) | first %}
-            {{ pick.entity_id if pick is defined else 'none found' }}
+# Door sensor: Sonoff SNZB-04P "Main door" = binary_sensor.main_door_sonoff_a4b00294d5.
+# Speaker (chosen by the function): media_player.google_home. media_player.living_room_speaker is the LG soundbar.
 
 rest_command:
   home_event:
@@ -39,7 +10,7 @@ rest_command:
     method: POST
     content_type: "application/json"
     timeout: 30
-    payload: '{"entity": "binary_sensor.main_door_alert_source", "event": "{{ event }}"}'
+    payload: '{"entity": "binary_sensor.main_door_sonoff_a4b00294d5", "event": "{{ event }}"}'
 
 input_boolean:
   main_door_alerted:
@@ -54,12 +25,12 @@ automation:
     mode: restart
     triggers:
       - trigger: state
-        entity_id: binary_sensor.main_door_alert_source
+        entity_id: binary_sensor.main_door_sonoff_a4b00294d5
         to: "on"
         for: "00:10:00"
         id: open
       - trigger: state
-        entity_id: binary_sensor.main_door_alert_source
+        entity_id: binary_sensor.main_door_sonoff_a4b00294d5
         from: "on"
         to: "off"
         id: closed
@@ -83,7 +54,7 @@ automation:
                     - condition: not
                       conditions:
                         - condition: state
-                          entity_id: binary_sensor.main_door_alert_source
+                          entity_id: binary_sensor.main_door_sonoff_a4b00294d5
                           state: "on"
           - conditions:
               - condition: trigger
