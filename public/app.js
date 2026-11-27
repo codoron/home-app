@@ -13,6 +13,7 @@ const haCall = httpsCallable(fns, 'haCall', { timeout: 30000 });
 const voiceFn = httpsCallable(fns, 'voice', { timeout: 70000 });
 const remOps = httpsCallable(fns, 'reminderOps', { timeout: 30000 });
 const pushTokenFn = httpsCallable(fns, 'pushToken', { timeout: 20000 });
+const camSnapFn = httpsCallable(fns, 'camSnap', { timeout: 15000 });
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -51,6 +52,7 @@ const P = {
   home: 'M12 3 3 10v10a1 1 0 0 0 1 1h5v-6h6v6h5a1 1 0 0 0 1-1V10z',
   drag: 'M7 4h3v3H7zm7 0h3v3h-3zM7 10.5h3v3H7zm7 0h3v3h-3zM7 17h3v3H7zm7 0h3v3h-3z',
   moon: 'M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z',
+  cam: 'M4 7h3l1.5-2h7L17 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zm8 2.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z',
 };
 const svg = (k) => `<svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="${P[k] || P.power}"/></svg>`;
 
@@ -61,6 +63,7 @@ function iconFor(e) {
   const lamp = /light|lamp|led|spot|אור|תאורה|מנורה|ספוט|נברשת/.test(n);
   if (d === 'light' || (lamp && /\bfan\b|מאוורר/.test(n) && d !== 'fan')) return 'bulb';
   if (d === 'lock') return e.state === 'unlocked' ? 'unlock' : 'lock';
+  if (d === 'camera') return 'cam';
   if (d === 'binary_sensor') return ['motion', 'occupancy'].includes(e.device_class) ? 'motion' : 'door';
   if (d === 'sensor') return /fridge|refrigerator|מקרר|freezer|מקפיא/.test(n) ? 'fridge' : 'temp';
   if (d === 'climate' || /\bac\b|ac_|aircon|air con|מזגן|מיזוג/.test(n)) return /heat|חימום/.test(n) ? 'sun' : 'snow';
@@ -87,6 +90,7 @@ function stateText(e) {
   const d = dom(e.id), s = e.state;
   if (s === 'unavailable' || s === 'unknown') return 'לא זמין';
   if (e.remote) return (s === 'off' || s === 'standby' ? 'כבוי' : 'דולק') + ' · שלט';
+  if (d === 'camera') return camState(e).text;
   if (TOGGLE.includes(d)) return s === 'off' ? 'כבוי' : 'דולק';
   if (d === 'cover') {
     const t = { open: 'פתוח', closed: 'סגור', opening: 'נפתח…', closing: 'נסגר…' }[s] || s;
@@ -149,12 +153,14 @@ function tile(id, opts = {}) {
         <button data-act="${esc(id)}" data-s="${e.state === 'off' ? 'turn_on' : 'turn_off'}" aria-label="הפעלה">${svg('power')}</button>
       </div></div>`;
   }
+  if (d === 'camera') return camTile(e, star, opts);
   if (SENSOR.includes(d)) return '';
   return `<div class="${cls.join(' ')}" data-key="${esc(id)}" data-tap="${esc(id)}" role="button" tabindex="0">${star}${head}${label}</div>`;
 }
 
 function sensorChips(ids) {
-  const chips = ids.map(ent).filter((e) => e && SENSOR.includes(dom(e.id)) && e.state !== 'unavailable').map((e) => {
+  const own = camSensors();
+  const chips = ids.map(ent).filter((e) => e && SENSOR.includes(dom(e.id)) && e.state !== 'unavailable' && !own.has(e.id)).map((e) => {
     const alert = dom(e.id) === 'binary_sensor' && e.state === 'on' && !['motion', 'occupancy'].includes(e.device_class);
     return `<span class="chip ${alert ? 'alert' : ''}">${esc(e.name)}: ${esc(stateText(e))}</span>`;
   });
@@ -267,9 +273,11 @@ function roomSummary(ids) {
   const parts = [];
   if (lights) parts.push(lights === 1 ? 'מכשיר אחד דולק' : `${lights} דולקים`);
   if (open) parts.push(open === 1 ? 'תריס פתוח' : `${open} תריסים פתוחים`);
+  const person = es.some((e) => dom(e.id) === 'camera' && camState(e).person);
+  if (person) parts.push('זוהה אדם במצלמה');
   if (unlocked) parts.push('הדלת לא נעולה');
   else if (doorOpen) parts.push('דלת פתוחה');
-  return { text: parts.join(' · ') || 'הכול כבוי', on: lights > 0, alert: unlocked || doorOpen, temp: temp ? `${Math.round(parseFloat(temp.state) * 10) / 10}°` : '' };
+  return { text: parts.join(' · ') || 'הכול כבוי', on: lights > 0, alert: unlocked || doorOpen || person, temp: temp ? `${Math.round(parseFloat(temp.state) * 10) / 10}°` : '' };
 }
 
 function roomById(id) {
@@ -340,6 +348,7 @@ function openRoom(id) {
 window.addEventListener('popstate', () => {
   // closing a sheet with × steps history back once; that step must not also leave the room
   if (S.skipPop) { S.skipPop = false; return; }
+  if (S.cam) { closeCam(false); return; }
   if (S.remote) { closeRemote(false); return; }
   if (S.gsheet) { closeGroup(false); return; }
   if (S.rsheet) { closeRemSheet(false); return; }
@@ -402,6 +411,8 @@ function render() {
   document.body.classList.toggle('tablet', isTablet());
   if (S.remote && !R.edit && !R.num) renderRemote();
   if (S.gsheet) renderGroup();
+  if (S.cam) renderCamInfo();
+  camTick();
   document.body.classList.toggle('arranging', !!S.edit);
   initSortables();
   const mineLabel = document.querySelector('[data-tab="mine"] span');
@@ -714,6 +725,7 @@ let lastTouch = Date.now();
 for (const ev of ['pointerdown', 'keydown', 'scroll']) addEventListener(ev, () => { lastTouch = Date.now(); keepAwake(); }, { passive: true });
 setInterval(() => {
   if (!isTablet() || Date.now() - lastTouch < 60000) return;
+  if (S.cam) { closeCam(true); return; }
   if (S.remote) { closeRemote(true); return; }
   if (S.gsheet) { closeGroup(true); return; }
   if (S.rsheet) { closeRemSheet(true); return; }
@@ -722,6 +734,145 @@ setInterval(() => {
     S.tab = 'rooms'; render(); window.scrollTo(0, 0);
   }
 }, 5000);
+
+
+/* ---------- cameras (ONVIF via HA; pictures come through the camSnap function) ---------- */
+// A camera tile shows a recent still (refreshed every ~20s while on screen); tapping opens a near-live view
+// (a new picture about once a second while the sheet is open and the app is visible).
+const CAM = { img: {}, at: {}, busy: new Set(), err: {} };
+const CAM_THUMB_MS = 20000;
+
+function camSensors() {
+  const set = new Set();
+  if (!S.data) return set;
+  for (const e of Object.values(S.data.entities)) {
+    if (dom(e.id) !== 'camera') continue;
+    if (e.cam_person) set.add(e.cam_person);
+    for (const m of e.cam_motion || []) set.add(m);
+  }
+  return set;
+}
+function camState(e) {
+  const p = ent(e.cam_person);
+  const person = !!(p && p.state === 'on');
+  const motion = (e.cam_motion || []).some((id) => { const m = ent(id); return m && m.state === 'on'; });
+  if (isNA(e)) return { text: 'לא זמינה', person: false, motion: false };
+  return { text: person ? '🚶 זוהה אדם' : motion ? 'יש תנועה' : 'שקט', person, motion };
+}
+function camTile(e, star, opts) {
+  const st = camState(e);
+  const src = CAM.img[e.id];
+  const cls = ['tile', 'cam-tile', 'wide'];
+  if (st.person) cls.push('alert'); else if (st.motion) cls.push('on');
+  if (isNA(e)) cls.push('na');
+  const where = opts_where || opts.where ? `<div class="st where">${esc(areaName(roomById(roomOfEntity(e.id)) || { name: '' }))}</div>` : '';
+  return `<div class="${cls.join(' ')}" data-key="${esc(e.id)}" data-tap="${esc(e.id)}" role="button" tabindex="0">${star}
+    <div class="cam-pic">${src ? `<img data-cam="${esc(e.id)}" src="${src}" alt="">` : `<img data-cam="${esc(e.id)}" alt="" hidden><span class="cam-wait">${svg('cam')}</span>`}
+      <span class="cam-live">${esc(st.text)}</span></div>
+    <div class="cam-foot"><div class="nm">${esc(camName(e))}</div>${where}<div class="st cam-ago" data-camago="${esc(e.id)}">${esc(camAgo(e.id))}</div></div>
+  </div>`;
+}
+const camName = (e) => (/mainstream|substream|cam-?b1p/i.test(e.name) ? 'מצלמה' : e.name);
+function camAgo(id) {
+  if (CAM.err[id] && !CAM.img[id]) return 'המצלמה לא עונה';
+  if (!CAM.at[id]) return 'טוען תמונה…';
+  const s = Math.round((Date.now() - CAM.at[id]) / 1000);
+  return s < 5 ? 'עכשיו' : s < 60 ? `לפני ${s} שניות` : `לפני ${Math.round(s / 60)} דק׳`;
+}
+// Paints a new picture into every <img> of that camera without redrawing the page.
+function camPaint(id) {
+  for (const img of document.querySelectorAll(`img[data-cam="${CSS.escape(id)}"]`)) {
+    img.src = CAM.img[id]; img.hidden = false;
+    const w = img.parentElement.querySelector('.cam-wait'); if (w) w.remove();
+  }
+  for (const el of document.querySelectorAll(`[data-camago="${CSS.escape(id)}"]`)) el.textContent = camAgo(id);
+}
+async function camFetch(id, live) {
+  if (CAM.busy.has(id)) return false;
+  CAM.busy.add(id);
+  try {
+    const r = await camSnapFn({ id, live: !!live });
+    const old = CAM.img[id];
+    const bin = atob(r.data.img), buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    CAM.img[id] = URL.createObjectURL(new Blob([buf], { type: r.data.type || 'image/jpeg' }));
+    CAM.at[id] = Date.now(); delete CAM.err[id];
+    camPaint(id);
+    if (old) setTimeout(() => URL.revokeObjectURL(old), 3000);
+    return true;
+  } catch (e) {
+    CAM.err[id] = e.message || 'error';
+    for (const el of document.querySelectorAll(`[data-camago="${CSS.escape(id)}"]`)) el.textContent = CAM.img[id] ? camAgo(id) + ' · אין חיבור' : 'המצלמה לא עונה';
+    return false;
+  } finally { CAM.busy.delete(id); }
+}
+// thumbnails of cameras that are on screen
+function camTick() {
+  if (!S.data || document.hidden || S.cam) return;
+  const ids = new Set([...document.querySelectorAll('#view img[data-cam]')].map((i) => i.dataset.cam));
+  for (const id of ids) {
+    const wait = CAM.err[id] ? 60000 : CAM_THUMB_MS;
+    if (!CAM.at[id] || Date.now() - CAM.at[id] > wait) { if (!CAM.err[id] || Date.now() - (CAM.errAt || 0) > wait) { CAM.errAt = Date.now(); camFetch(id); } }
+  }
+}
+setInterval(camTick, 5000);
+setInterval(() => { for (const id of Object.keys(CAM.at)) for (const el of document.querySelectorAll(`[data-camago="${CSS.escape(id)}"]`)) el.textContent = camAgo(id); }, 5000);
+
+function openCam(id) {
+  S.cam = id;
+  history.pushState({ cam: id }, '');
+  let el = document.getElementById('camsheet');
+  if (!el) { el = document.createElement('div'); el.id = 'camsheet'; el.className = 'sheet'; document.body.appendChild(el); }
+  const e = ent(id);
+  const src = CAM.img[id];
+  el.innerHTML = `<div class="r-backdrop" data-rclose></div>
+  <div class="r-sheet cam-sheet" role="dialog" aria-label="מצלמה">
+    <div class="r-head">
+      <div class="r-title"><span class="h-ic sm">${svg('cam')}</span><div><b>${esc(camName(e))}</b><small>${esc(areaName(roomById(roomOfEntity(id)) || { name: '' }))}</small></div></div>
+      <button class="r-x" data-rclose aria-label="סגירה">×</button>
+    </div>
+    <div class="cam-big"><img data-cam="${esc(id)}" ${src ? `src="${src}"` : 'hidden'} alt=""><span class="cam-live" id="camState"></span></div>
+    <div class="cam-meta"><span class="cam-dot"></span><span data-camago="${esc(id)}">${esc(camAgo(id))}</span></div>
+  </div>`;
+  renderCamInfo();
+  requestAnimationFrame(() => el.classList.add('open'));
+  camLive(id);
+}
+function renderCamInfo() {
+  const e = S.cam && ent(S.cam);
+  const el = document.getElementById('camState');
+  if (!e || !el) return;
+  const st = camState(e);
+  el.textContent = st.text;
+  el.className = 'cam-live' + (st.person ? ' alert' : st.motion ? ' on' : '');
+}
+async function camLive(id) {
+  const run = (CAM.run = (CAM.run || 0) + 1);
+  let fails = 0;
+  while (S.cam === id && CAM.run === run) {
+    if (document.hidden) { await new Promise((r) => setTimeout(r, 1000)); continue; }
+    const t0 = Date.now();
+    const ok = await camFetch(id, true);
+    fails = ok ? 0 : fails + 1;
+    const dot = document.querySelector('#camsheet .cam-dot');
+    if (dot) dot.classList.toggle('bad', !ok);
+    await new Promise((r) => setTimeout(r, Math.max(fails ? 3000 : 300, 1000 - (Date.now() - t0))));
+  }
+}
+function closeCam(viaHistory) {
+  const el = document.getElementById('camsheet');
+  S.cam = null; CAM.run = (CAM.run || 0) + 1;
+  if (el) el.classList.remove('open');
+  if (viaHistory) { S.skipPop = true; history.back(); }
+}
+// a quick person-detected refresh: when the camera sees someone, poll the house sooner
+let camPersonWas = false;
+setInterval(() => {
+  if (!S.data) return;
+  const now = Object.values(S.data.entities).some((e) => dom(e.id) === 'camera' && camState(e).person);
+  if (now && !camPersonWas) for (const e of Object.values(S.data.entities)) if (dom(e.id) === 'camera') CAM.at[e.id] = 0;
+  camPersonWas = now;
+}, 2000);
 
 
 /* ---------- TV remote (Android TV Remote + Broadlink volume) ---------- */
@@ -931,6 +1082,7 @@ async function act(calls, optimistic) {
 function toggle(id) {
   const e = ent(id), d = dom(id);
   if (e.remote) return openRemote(id);
+  if (d === 'camera') return openCam(id);
   if (RUN.includes(d)) {
     act([{ e: id, s: d === 'button' ? 'press' : 'turn_on' }]).then((ok) => ok && toast(`✓ ${e.name}`));
     return;
@@ -1272,6 +1424,10 @@ document.addEventListener('click', async (ev) => {
     if ('rclose' in ds) return closeRemSheet(true);
     if (ds.remday != null) { remForm().day = Number(ds.remday); return renderRemSheet(true); }
     if ('remdel' in ds) return cancelReminder(S.rsheet, true);
+  }
+  if (t.closest('#camsheet')) {
+    if ('rclose' in ds) return closeCam(true);
+    return;
   }
   if (t.closest('#gsheet')) {
     if ('rclose' in ds) return closeGroup(true);

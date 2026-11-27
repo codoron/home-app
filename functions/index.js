@@ -97,6 +97,7 @@ async function getMember(req) {
 function shown(s) {
   const d = dom(s.entity_id);
   if (SERVICES[d]) return true;
+  if (d === 'camera') return true;   // viewed through camSnap, never controlled
   if (READ_ONLY[d]) return READ_ONLY[d].includes(s.attributes.device_class);
   return false;
 }
@@ -120,10 +121,24 @@ async function getCfg() {
   return cfgCache;
 }
 
+// Each camera's sibling entities on the same HA device (the ONVIF motion / person sensors). Cached like areas.
+const CAM_TPL = "{% set ns = namespace(c=[]) %}{% for s in states.camera %}{% set d = device_id(s.entity_id) %}{% if d %}{% set ns.c = ns.c + [[s.entity_id, device_entities(d)]] %}{% endif %}{% endfor %}{{ ns.c | tojson }}";
+let camCache = null, camAt = 0;
+async function getCams() {
+  if (camCache && Date.now() - camAt < 5 * 60 * 1000) return camCache;
+  try {
+    let res = await ha('/api/template', { method: 'POST', body: JSON.stringify({ template: CAM_TPL }) });
+    if (typeof res === 'string') res = JSON.parse(res);
+    camCache = Object.fromEntries(res);
+  } catch (e) { camCache = camCache || {}; }
+  camAt = Date.now();
+  return camCache;
+}
+
 // what view() needs from HA and Firestore; started early (in parallel with the member lookup) by the callers
-const fetchHouse = () => Promise.all([getAreas(), ha('/api/states'), getCfg()]);
+const fetchHouse = () => Promise.all([getAreas(), ha('/api/states'), getCfg(), getCams()]);
 async function view(m, pre) {
-  const [areas, states, cfg] = await (pre || fetchHouse());
+  const [areas, states, cfg, cams = {}] = await (pre || fetchHouse());
   // the shared living-room tablet controls the whole house, like a parent
   const parent = m.role === 'parent' || m.role === 'tablet';
   const byId = {};
@@ -190,6 +205,18 @@ async function view(m, pre) {
     entities[r] = slim(byId[r]);
     const vol = volFor(areaOf[id], irAreas.has(areaOf[id]));
     for (const [k, sid] of Object.entries(vol)) { entities[id]['vol_' + k] = sid; entities[sid] = slim(byId[sid]); }
+  }
+  // A camera card carries its own motion / person sensors (same HA device); they are not shown as chips
+  for (const id of Object.keys(entities)) {
+    if (dom(id) !== 'camera') continue;
+    const sib = (cams[id] || []).filter((e) => byId[e] && dom(e) === 'binary_sensor');
+    const person = sib.find((e) => /person|people|human|אדם/i.test(e + ' ' + nm(e)));
+    const motion = sib.filter((e) => e !== person);
+    if (person) { entities[id].cam_person = person; entities[person] = slim(byId[person]); }
+    if (motion.length) {
+      entities[id].cam_motion = motion;
+      for (const e of motion) entities[e] = slim(byId[e]);
+    }
   }
   // remote entities are controls behind a TV, never tiles of their own
   for (const a of outAreas) a.entities = a.entities.filter((e) => dom(e) !== 'remote');
@@ -264,6 +291,39 @@ exports.haCall = onCall(SECRETS, async (req) => {
   const v = await view(m);
   await runCalls(m, v, calls);
   return { ok: true };
+});
+
+// A camera picture, for whoever may see that camera in the app. The HA token stays here.
+// live: the full-screen view asks about once a second, so who-may-see-what is cached per instance for a minute.
+const camPerm = new Map();   // email -> { at, cams: Set }
+async function camAllowed(req, id) {
+  const email = req.auth && req.auth.token && req.auth.token.email && req.auth.token.email.toLowerCase();
+  const c = email && camPerm.get(email);
+  if (c && Date.now() - c.at < 60 * 1000) return c.cams.has(id);
+  const pre = fetchHouse(); pre.catch(() => {});
+  const m = await getMember(req);
+  const v = await view(m, pre);
+  const cams = new Set(Object.keys(v.entities).filter((e) => dom(e) === 'camera'));
+  camPerm.set(m.email, { at: Date.now(), cams });
+  return cams.has(id);
+}
+
+exports.camSnap = onCall({ ...SECRETS, memory: '512MiB' }, async (req) => {
+  const id = String((req.data && req.data.id) || '');
+  if (!/^camera\.[a-z0-9_]{1,80}$/.test(id)) throw new HttpsError('invalid-argument', 'מצלמה לא מוכרת');
+  if (!(await camAllowed(req, id))) throw new HttpsError('permission-denied', 'אין הרשאה למצלמה');
+  const width = req.data.live ? 1280 : 480;
+  const base = HA_URL.value().trim().replace(/\/+$/, '');
+  let r;
+  try {
+    r = await fetch(`${base}/api/camera_proxy/${id}?width=${width}`, {
+      headers: { Authorization: 'Bearer ' + HA_TOKEN.value().trim() },
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch (e) { throw new HttpsError('unavailable', 'המצלמה לא עונה כרגע'); }
+  if (!r.ok) throw new HttpsError('unavailable', 'המצלמה החזירה שגיאה ' + r.status);
+  const buf = Buffer.from(await r.arrayBuffer());
+  return { type: r.headers.get('content-type') || 'image/jpeg', img: buf.toString('base64'), at: Date.now() };
 });
 
 const bot = require('./whatsapp')({ ha, view, fetchHouse, getCfg, runCalls, db, dom, objId, getMember, SERVICES, HA_URL, HA_TOKEN });
