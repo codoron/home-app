@@ -12,6 +12,35 @@ const SITE = 'https://home-app-f94e4.web.app/';
 const tokenId = (t) => crypto.createHash('sha256').update(t).digest('hex').slice(0, 40);
 
 module.exports = ({ ha, db, getMember, getCfg, HA_URL, HA_TOKEN, WA_TOKEN }) => {
+  // ---- spoken on the house Google speaker (not 22:00-07:00 Israel time) ----
+  const quiet = () => { const h = +new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', hour12: false }).format(new Date()) % 24; return h >= 22 || h < 7; };
+  async function speak(message) {
+    if (quiet()) return 'quiet';
+    const cfg = await getCfg();
+    const states = await ha('/api/states');
+    const ids = new Set(states.map((x) => x.entity_id));
+    let tts = cfg.ttsEntity, lang = cfg.ttsLanguage;
+    if (!tts) { const t = [...ids].filter((e) => e.startsWith('tts.')); tts = t.find((e) => /cloud/.test(e)) || t.find((e) => /google/.test(e)) || t[0]; }
+    if (!tts) return 'no tts';
+    if (!lang) lang = /google_translate/.test(tts) ? 'iw' : 'he-IL';
+    // same speaker as the reminders: pinned, else the one the last spoken reminder used, else the best Google speaker
+    let sp = cfg.alertSpeaker || cfg.reminderSpeaker;
+    if (!sp) {
+      const done = await db.collection('reminders').where('status', '==', 'done').limit(20).get();
+      const last = done.docs.map((d) => d.data()).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0))[0];
+      if (last && ids.has(last.speaker)) sp = last.speaker;
+    }
+    if (!sp) {
+      const rank = (x) => { const n = (x.attributes.friendly_name || '') + ' ' + x.entity_id;
+        return /sound ?bar|סאונד ?בר|\blg\b|tv|טלוויזיה|bravia|samsung/i.test(n) ? 9 : /google|גוגל|nest|home ?mini/i.test(n) ? 0 : /speaker|רמקול/i.test(n) ? 1 : 5; };
+      const c = states.filter((x) => x.entity_id.startsWith('media_player.')).sort((a, b) => rank(a) - rank(b));
+      if (c.length && rank(c[0]) < 5) sp = c[0].entity_id;
+    }
+    if (!sp) return 'no speaker';
+    await ha('/api/services/tts/speak', { method: 'POST', body: JSON.stringify({ entity_id: tts, media_player_entity_id: sp, message, language: lang }) });
+    return sp;
+  }
+
   // ---- push tokens (one doc per phone/browser; clients never read them) ----
   const pushToken = onCall(async (req) => {
     const m = await getMember(req);
@@ -108,16 +137,20 @@ module.exports = ({ ha, db, getMember, getCfg, HA_URL, HA_TOKEN, WA_TOKEN }) => 
         if (d.openedAt === changed && now - (d.lastOpenSent || 0) < 4 * 60 * 1000) return null;
         tx.set(ref, { openedAt: changed, lastOpenSent: now, alerts: d.openedAt === changed ? (d.alerts || 0) + 1 : 1 }, { merge: true });
         const min = Math.round((now - changed) / 60000);
-        return { title: `🚪 ${name} פתוחה`, body: `פתוחה כבר ${min} דקות`, wa: `🚪 ${name} פתוחה כבר ${min} דקות`, tag: 'door-' + entity };
+        return { title: `🚪 ${name} פתוחה`, body: `פתוחה כבר ${min} דקות`, wa: `🚪 ${name} פתוחה כבר ${min} דקות`, say: `שימו לב, ${name} פתוחה כבר ${min} דקות`, tag: 'door-' + entity };
       }
       if (s.state === 'on' || !d.openedAt || d.closedFor === d.openedAt) return null;
       tx.set(ref, { closedFor: d.openedAt, closedAt: changed }, { merge: true });
       const min = Math.max(1, Math.round((changed - d.openedAt) / 60000));
-      return { title: `✅ ${name} נסגרה`, body: `הייתה פתוחה ${min} דקות`, wa: `✅ ${name} נסגרה (הייתה פתוחה ${min} דקות)`, tag: 'door-' + entity };
+      return { title: `✅ ${name} נסגרה`, body: `הייתה פתוחה ${min} דקות`, wa: `✅ ${name} נסגרה (הייתה פתוחה ${min} דקות)`, say: `${name} נסגרה`, tag: 'door-' + entity };
     });
     if (!plan) { res.json({ ok: true, skipped: true }); return; }
-    const r = await notifyAll(plan.title, plan.body, plan.tag, plan.wa);
-    res.json({ ok: true, ...r });
+    const [r, spoke] = await Promise.all([
+      notifyAll(plan.title, plan.body, plan.tag, plan.wa),
+      speak(plan.say).catch((e) => { console.error('alert speak', e.message); return 'failed'; }),
+    ]);
+    console.log('alert spoken', spoke);
+    res.json({ ok: true, ...r, spoke });
   });
 
   return { pushToken, homeEvent };
