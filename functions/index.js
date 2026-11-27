@@ -295,28 +295,30 @@ exports.haCall = onCall(SECRETS, async (req) => {
 
 // A camera picture, for whoever may see that camera in the app. The HA token stays here.
 // live: the full-screen view asks about once a second, so who-may-see-what is cached per instance for a minute.
-const camPerm = new Map();   // email -> { at, cams: Set }
-async function camAllowed(req, id) {
+const camPerm = new Map();   // email -> { at, cams: Set, role }
+async function camAccess(req, id) {
   const email = req.auth && req.auth.token && req.auth.token.email && req.auth.token.email.toLowerCase();
   const c = email && camPerm.get(email);
-  if (c && Date.now() - c.at < 60 * 1000) return c.cams.has(id);
+  if (c && Date.now() - c.at < 60 * 1000) return { see: c.cams.has(id), role: c.role };
   const pre = fetchHouse(); pre.catch(() => {});
   const m = await getMember(req);
   const v = await view(m, pre);
   const cams = new Set(Object.keys(v.entities).filter((e) => dom(e) === 'camera'));
-  camPerm.set(m.email, { at: Date.now(), cams });
-  return cams.has(id);
+  camPerm.set(m.email, { at: Date.now(), cams, role: m.role });
+  return { see: cams.has(id), role: m.role };
 }
+const camAllowed = async (req, id) => (await camAccess(req, id)).see;
 
 exports.camSnap = onCall({ ...SECRETS, memory: '512MiB' }, async (req) => {
   const id = String((req.data && req.data.id) || '');
   if (!/^camera\.[a-z0-9_]{1,80}$/.test(id)) throw new HttpsError('invalid-argument', 'מצלמה לא מוכרת');
   if (!(await camAllowed(req, id))) throw new HttpsError('permission-denied', 'אין הרשאה למצלמה');
-  const width = req.data.live ? 1280 : 480;
+  // live: 1280 wide; 'full': the camera's own 2K picture (zoomed in); otherwise a small still for the tile
+  const q = req.data.live === 'full' ? '' : `?width=${req.data.live ? 1280 : 480}`;
   const base = HA_URL.value().trim().replace(/\/+$/, '');
   let r;
   try {
-    r = await fetch(`${base}/api/camera_proxy/${id}?width=${width}`, {
+    r = await fetch(`${base}/api/camera_proxy/${id}${q}`, {
       headers: { Authorization: 'Bearer ' + HA_TOKEN.value().trim() },
       signal: AbortSignal.timeout(10000),
     });
@@ -324,6 +326,20 @@ exports.camSnap = onCall({ ...SECRETS, memory: '512MiB' }, async (req) => {
   if (!r.ok) throw new HttpsError('unavailable', 'המצלמה החזירה שגיאה ' + r.status);
   const buf = Buffer.from(await r.arrayBuffer());
   return { type: r.headers.get('content-type') || 'image/jpeg', img: buf.toString('base64'), at: Date.now() };
+});
+
+// Turning a camera left / right (ONVIF PTZ through HA). Everyone who sees the camera may watch,
+// only parents and the shared tablet may turn it. One call = one short move (HA stops it after `continuous_duration`).
+exports.camPtz = onCall(SECRETS, async (req) => {
+  const id = String((req.data && req.data.id) || '');
+  const pan = String(req.data.pan || '');
+  if (!/^camera\.[a-z0-9_]{1,80}$/.test(id) || !['LEFT', 'RIGHT'].includes(pan)) throw new HttpsError('invalid-argument', 'פעולה לא מוכרת');
+  const a = await camAccess(req, id);
+  if (!a.see) throw new HttpsError('permission-denied', 'אין הרשאה למצלמה');
+  if (!['parent', 'tablet'].includes(a.role)) throw new HttpsError('permission-denied', 'רק הורים מסובבים את המצלמה');
+  const dur = Math.min(1.5, Math.max(0.2, Number(req.data.duration) || 0.5));
+  await ha('/api/services/onvif/ptz', { method: 'POST', body: JSON.stringify({ entity_id: id, pan, move_mode: 'ContinuousMove', continuous_duration: dur }) });
+  return { ok: true };
 });
 
 const bot = require('./whatsapp')({ ha, view, fetchHouse, getCfg, runCalls, db, dom, objId, getMember, SERVICES, HA_URL, HA_TOKEN });

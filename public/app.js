@@ -14,6 +14,7 @@ const voiceFn = httpsCallable(fns, 'voice', { timeout: 70000 });
 const remOps = httpsCallable(fns, 'reminderOps', { timeout: 30000 });
 const pushTokenFn = httpsCallable(fns, 'pushToken', { timeout: 20000 });
 const camSnapFn = httpsCallable(fns, 'camSnap', { timeout: 15000 });
+const camPtzFn = httpsCallable(fns, 'camPtz', { timeout: 15000 });
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -52,6 +53,9 @@ const P = {
   home: 'M12 3 3 10v10a1 1 0 0 0 1 1h5v-6h6v6h5a1 1 0 0 0 1-1V10z',
   drag: 'M7 4h3v3H7zm7 0h3v3h-3zM7 10.5h3v3H7zm7 0h3v3h-3zM7 17h3v3H7zm7 0h3v3h-3z',
   moon: 'M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z',
+  full: 'M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 0h2v6h-6v-2h4z',
+  unfull: 'M8 4h2v6H4V8h4zm6 0h2v4h4v2h-6zM4 14h6v6H8v-4H4zm10 0h6v2h-4v4h-2z',
+  save: 'M11 3h2v9.2l3.3-3.3 1.4 1.4L12 16l-5.7-5.7 1.4-1.4 3.3 3.3zM4 18h16v2H4z',
   cam: 'M4 7h3l1.5-2h7L17 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zm8 2.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z',
 };
 const svg = (k) => `<svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="${P[k] || P.power}"/></svg>`;
@@ -791,7 +795,7 @@ async function camFetch(id, live) {
   if (CAM.busy.has(id)) return false;
   CAM.busy.add(id);
   try {
-    const r = await camSnapFn({ id, live: !!live });
+    const r = await camSnapFn({ id, live: live || false });
     const old = CAM.img[id];
     const bin = atob(r.data.img), buf = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
@@ -831,12 +835,128 @@ function openCam(id) {
       <div class="r-title"><span class="h-ic sm">${svg('cam')}</span><div><b>${esc(camName(e))}</b><small>${esc(areaName(roomById(roomOfEntity(id)) || { name: '' }))}</small></div></div>
       <button class="r-x" data-rclose aria-label="סגירה">×</button>
     </div>
-    <div class="cam-big"><img data-cam="${esc(id)}" ${src ? `src="${src}"` : 'hidden'} alt=""><span class="cam-live" id="camState"></span></div>
-    <div class="cam-meta"><span class="cam-dot"></span><span data-camago="${esc(id)}">${esc(camAgo(id))}</span></div>
+    <div class="cam-big" id="camBig"><img data-cam="${esc(id)}" ${src ? `src="${src}"` : 'hidden'} alt="" draggable="false"><span class="cam-live" id="camState"></span>
+      ${canTurn() ? `<button class="cam-pan l" data-pan="LEFT" aria-label="לסובב שמאלה">${svg('left')}</button><button class="cam-pan r" data-pan="RIGHT" aria-label="לסובב ימינה">${svg('right')}</button>` : ''}
+      <div class="cam-tools"><button data-camsave aria-label="שמירת תמונה">${svg('save')}</button><button data-camfs aria-label="מסך מלא">${svg('full')}</button></div>
+    </div>
+    <div class="cam-meta"><span class="cam-dot"></span><span data-camago="${esc(id)}">${esc(camAgo(id))}</span><span class="cam-hint">צביטה או לחיצה כפולה להגדלה${canTurn() ? ' · ◀ ▶ לסיבוב (לחיצה ארוכה = סיבוב רציף)' : ''}</span></div>
   </div>`;
   renderCamInfo();
   requestAnimationFrame(() => el.classList.add('open'));
+  camZoomInit(document.getElementById('camBig'));
+  camPanInit(el);
   camLive(id);
+}
+const canTurn = () => S.data && ['parent', 'tablet'].includes(S.data.me.role);
+
+/* zoom: pinch, wheel, double tap; drag to move around when zoomed */
+const Z = { s: 1, x: 0, y: 0 };
+function camZoomApply(box) {
+  const img = box.querySelector('img');
+  const w = box.clientWidth, h = box.clientHeight;
+  Z.s = Math.min(5, Math.max(1, Z.s));
+  const mx = ((Z.s - 1) * w) / 2, my = ((Z.s - 1) * h) / 2;
+  Z.x = Math.min(mx, Math.max(-mx, Z.x)); Z.y = Math.min(my, Math.max(-my, Z.y));
+  if (Z.s === 1) { Z.x = 0; Z.y = 0; }
+  img.style.transform = `translate(${Z.x}px, ${Z.y}px) scale(${Z.s})`;
+  box.classList.toggle('zoomed', Z.s > 1);
+}
+function camZoomInit(box) {
+  Z.s = 1; Z.x = 0; Z.y = 0;
+  const pts = new Map();
+  let start = null, lastTap = 0;
+  const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  // zoom around a point (cx, cy relative to the box centre)
+  const zoomAt = (ns, cx, cy) => { const k = Math.min(5, Math.max(1, ns)) / Z.s; Z.x = cx - (cx - Z.x) * k; Z.y = cy - (cy - Z.y) * k; Z.s *= k; camZoomApply(box); };
+  const rel = (e) => { const r = box.getBoundingClientRect(); return [e.clientX - r.left - r.width / 2, e.clientY - r.top - r.height / 2]; };
+  box.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    box.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    start = { s: Z.s, x: Z.x, y: Z.y, d: pts.size === 2 ? dist() : 0, px: e.clientX, py: e.clientY };
+    if (pts.size === 1) {
+      const now = Date.now();
+      if (now - lastTap < 300) { const [cx, cy] = rel(e); zoomAt(Z.s > 1.2 ? 1 : 2.5, cx, cy); lastTap = 0; } else lastTap = now;
+    }
+  });
+  box.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2 && start.d) {
+      const [a, b] = [...pts.values()], r = box.getBoundingClientRect();
+      const cx = (a.x + b.x) / 2 - r.left - r.width / 2, cy = (a.y + b.y) / 2 - r.top - r.height / 2;
+      Z.s = start.s; Z.x = start.x; Z.y = start.y;
+      zoomAt(start.s * (dist() / start.d), cx, cy);
+    } else if (pts.size === 1 && Z.s > 1) {
+      Z.x = start.x + (e.clientX - start.px); Z.y = start.y + (e.clientY - start.py); camZoomApply(box);
+    }
+  });
+  const up = (e) => {
+    pts.delete(e.pointerId);
+    if (pts.size === 1) { const p = [...pts.values()][0]; start = { s: Z.s, x: Z.x, y: Z.y, d: 0, px: p.x, py: p.y }; }
+  };
+  box.addEventListener('pointerup', up); box.addEventListener('pointercancel', up);
+  box.addEventListener('wheel', (e) => { e.preventDefault(); const [cx, cy] = rel(e); zoomAt(Z.s * (e.deltaY < 0 ? 1.15 : 1 / 1.15), cx, cy); }, { passive: false });
+  addEventListener('resize', () => camZoomApply(box));
+}
+
+/* turning: a tap = one short move, holding keeps turning until released */
+function camPanInit(el) {
+  for (const b of el.querySelectorAll('[data-pan]')) {
+    let held = false;
+    const go = async () => {
+      held = true; b.classList.add('busy');
+      do {
+        try { await camPtzFn({ id: S.cam, pan: b.dataset.pan, duration: 0.5 }); }
+        catch (e) { toast(e.message || 'הסיבוב נכשל'); held = false; }
+      } while (held && S.cam);
+      b.classList.remove('busy');
+    };
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); if (!b.classList.contains('busy')) go(); });
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => { held = false; });
+    b.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+}
+
+/* full screen: the real Fullscreen API where there is one (Android, iPad, desktop), otherwise a fixed full-window view (iPhone) */
+async function camFull() {
+  const box = document.getElementById('camBig');
+  if (!box) return;
+  const sheet = document.getElementById('camsheet');
+  const on = !!document.fullscreenElement || sheet.classList.contains('fs');
+  if (on) {
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+    sheet.classList.remove('fs');
+  } else if (box.requestFullscreen) {
+    try { await box.requestFullscreen(); screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); }
+    catch { sheet.classList.add('fs'); }
+  } else sheet.classList.add('fs');
+  Z.s = 1;
+  camFsIcon();
+}
+function camFsIcon() {
+  const b = document.querySelector('[data-camfs]');
+  const sheet = document.getElementById('camsheet');
+  const on = !!document.fullscreenElement || (sheet && sheet.classList.contains('fs'));
+  if (b) b.innerHTML = svg(on ? 'unfull' : 'full');
+  const box = document.getElementById('camBig'); if (box) camZoomApply(box);
+}
+document.addEventListener('fullscreenchange', camFsIcon);
+
+async function camSave() {
+  const url = CAM.img[S.cam];
+  if (!url) return toast('אין עדיין תמונה');
+  const blob = await (await fetch(url)).blob();
+  const d = new Date(), p = (n) => String(n).padStart(2, '0');
+  const name = `camera-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.jpg`;
+  const file = new File([blob], name, { type: blob.type || 'image/jpeg' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'תמונה מהמצלמה' }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast('✓ התמונה נשמרה');
 }
 function renderCamInfo() {
   const e = S.cam && ent(S.cam);
@@ -852,7 +972,7 @@ async function camLive(id) {
   while (S.cam === id && CAM.run === run) {
     if (document.hidden) { await new Promise((r) => setTimeout(r, 1000)); continue; }
     const t0 = Date.now();
-    const ok = await camFetch(id, true);
+    const ok = await camFetch(id, Z.s > 1.4 ? 'full' : true);
     fails = ok ? 0 : fails + 1;
     const dot = document.querySelector('#camsheet .cam-dot');
     if (dot) dot.classList.toggle('bad', !ok);
@@ -862,7 +982,8 @@ async function camLive(id) {
 function closeCam(viaHistory) {
   const el = document.getElementById('camsheet');
   S.cam = null; CAM.run = (CAM.run || 0) + 1;
-  if (el) el.classList.remove('open');
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (el) el.classList.remove('open', 'fs');
   if (viaHistory) { S.skipPop = true; history.back(); }
 }
 // a quick person-detected refresh: when the camera sees someone, poll the house sooner
@@ -1427,6 +1548,8 @@ document.addEventListener('click', async (ev) => {
   }
   if (t.closest('#camsheet')) {
     if ('rclose' in ds) return closeCam(true);
+    if ('camfs' in ds) return camFull();
+    if ('camsave' in ds) return camSave();
     return;
   }
   if (t.closest('#gsheet')) {
